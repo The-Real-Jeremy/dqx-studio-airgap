@@ -80,7 +80,15 @@ dest = W["install_dir"]
 if os.path.exists(dest):
     # Keep the previous install as <install_dir>.previous (one generation) instead of deleting it.
     if os.path.exists(dest + ".previous"):
-        shutil.rmtree(dest + ".previous")
+        try:
+            shutil.rmtree(dest + ".previous")
+        except OSError:  # /Workspace cannot unlink notebooks (Errno 95): delete through the Workspace API
+            from databricks.sdk import WorkspaceClient
+            WorkspaceClient().workspace.delete(dest + ".previous", recursive=True)
+            for _ in range(30):
+                if not os.path.exists(dest + ".previous"):
+                    break
+                time.sleep(1)
     os.rename(dest, dest + ".previous")
     for _ in range(30):  # the /Workspace mount can report the old path for a few seconds after a rename
         if not os.path.exists(dest):
