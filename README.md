@@ -36,7 +36,7 @@ principal; read [PAT exposure](#pat-exposure) before using it.
 | An existing **schema** where you have USE SCHEMA, CREATE TABLE, SELECT and MODIFY (plus USE CATALOG on its catalog) | Studio creates its 16 tables here. Creating a new schema is not needed |
 | An existing **volume** where you have READ VOLUME and WRITE VOLUME | Only to upload the repo zip. Creating a volume needs CREATE VOLUME, which you may not have; ask the schema owner for one, or use a Git folder (step 3, option B) |
 | An existing **SQL warehouse** you can use (CAN USE) | Studio reads and writes its tables through it |
-| Permission to **create a Databricks App** and a **job** | |
+| Permission to **create a Databricks App** and a **job** | If the workspace requires a **budget (usage) policy** for apps, you also need permission to use one (see field 12) |
 | Permission to **create a PAT** | Confirmed available in the target workspace. If PATs are disabled for you, this build cannot be used |
 
 The cluster wheels cover Python 3.11 (DBR 15.4 LTS) and 3.12 (DBR 16.4 LTS), and keep protobuf below 5 so the runtime's own mlflow-skinny and Google API packages are not broken. Another DBR needs a rebuild with its Python version. The app side does not depend on the cluster.
@@ -86,6 +86,7 @@ The first cell creates these fields at the top of the notebook. Run that cell on
 | 9 | Where the PAT is kept | `secret` (a secret scope, the default) or `app_yaml` (inside the app's config) | See [PAT exposure](#pat-exposure) |
 | 10 | Secret scope | e.g. `dqx_studio_airgap`. Created if it does not exist | |
 | 11 | PAT | Paste the token from step 2. Leave blank on a re-run to keep the stored one | |
+| 12 | Budget policy id | Leave blank unless app creation fails with *Unable to use fallback policies*. Then enter the policy's id, or leave it blank and create the app in the UI first (see Troubleshooting) | Your workspace admin. The setup prints the app's policy id once the app exists |
 
 ### 6. Run all
 
@@ -150,6 +151,8 @@ Schedules start the cluster when they fire, so the cluster's auto-termination se
 | A run fails with `UNRESOLVED_COLUMN` | An allowed value is not quoted | Edit the rule and write `'visa'`, not `visa` |
 | A run sits at "running" for several minutes | The cluster was terminated and the job is starting it | Wait about 8 minutes, or start the cluster first |
 | `deployment failed: open the app's Logs tab` | The app did not start | **Compute** > **Apps** > the app > **Logs**. Then re-run the notebook |
+| `Unable to use fallback policies, please manually select a policy` (or `requires a budget policy`) when the app is created | The workspace requires a budget policy on new apps | **Compute** > **Apps** > **Create app** > **Custom**, use the **same app name** as field 6, pick the policy, create. Then **Run all** again: the setup reuses the existing app. Or put the policy id in field 12 |
+| `user-authorisation scopes were refused` | On-behalf-of-user authorisation for Apps is not enabled in the workspace | A workspace admin enables user authorisation for Databricks Apps; then run all again |
 | `PERMISSION_DENIED` creating tables | Missing CREATE TABLE or USE SCHEMA on the schema | Ask the schema owner for those privileges |
 
 ## Remove it

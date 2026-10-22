@@ -30,6 +30,7 @@ dbutils.widgets.text("admin_group", "users", "8. Studio admin group")
 dbutils.widgets.dropdown("pat_storage", "secret", ["secret", "app_yaml"], "9. Where the PAT is kept")
 dbutils.widgets.text("secret_scope", "dqx_studio_airgap", "10. Secret scope (pat_storage=secret)")
 dbutils.widgets.text("pat", "", "11. PAT (paste; blank = keep stored)")
+dbutils.widgets.text("budget_policy_id", "", "12. Budget policy id for the app (blank = workspace default)")
 
 # COMMAND ----------
 
@@ -37,7 +38,7 @@ import json, os, zipfile, tempfile, shutil, time
 
 W = {k: dbutils.widgets.get(k).strip() for k in [
     "bundle", "catalog", "schema", "warehouse_id", "cluster_id", "app_name", "install_dir",
-    "admin_group", "pat_storage", "secret_scope"]}
+    "admin_group", "pat_storage", "secret_scope", "budget_policy_id"]}
 ctx = json.loads(dbutils.notebook.entry_point.getDbutils().notebook().getContext().safeToJson())["attributes"]
 me = ctx["user"]
 W["cluster_id"] = W["cluster_id"] or ctx["clusterId"]
@@ -116,7 +117,7 @@ dbutils.library.restartPython()
 import json, os, sys, time
 W = {k: dbutils.widgets.get(k).strip() for k in [
     "bundle", "catalog", "schema", "warehouse_id", "cluster_id", "app_name", "install_dir",
-    "admin_group", "pat_storage", "secret_scope"]}
+    "admin_group", "pat_storage", "secret_scope", "budget_policy_id"]}
 ctx = json.loads(dbutils.notebook.entry_point.getDbutils().notebook().getContext().safeToJson())["attributes"]
 me = ctx["user"]
 W["cluster_id"] = W["cluster_id"] or ctx["clusterId"]
@@ -224,7 +225,18 @@ name = W["app_name"]
 try:
     app = w.api_client.do("GET", f"/api/2.0/apps/{name}")
 except Exception:
-    app = w.api_client.do("POST", "/api/2.0/apps", body={"name": name, "description": "DQX Studio (air-gapped build)"})
+    create = {"name": name, "description": "DQX Studio (air-gapped build)"}
+    if W["budget_policy_id"]:
+        create["budget_policy_id"] = W["budget_policy_id"]
+    try:
+        app = w.api_client.do("POST", "/api/2.0/apps", body=create)
+    except Exception as e:
+        if "polic" in str(e).lower():
+            raise AssertionError(
+                f"this workspace requires a budget policy for new apps ({e}). Either set widget 12 to the policy id, "
+                f"or create the app in the UI (Compute > Apps > Create app > Custom, name '{name}', pick the policy), "
+                "then run all again: the setup reuses an existing app with that name") from e
+        raise
 for _ in range(80):
     app = w.api_client.do("GET", f"/api/2.0/apps/{name}")
     if app.get("compute_status", {}).get("state") in ("ACTIVE", "ERROR", "STOPPED"):
@@ -232,7 +244,7 @@ for _ in range(80):
     time.sleep(10)
 if app.get("compute_status", {}).get("state") == "STOPPED":
     w.api_client.do("POST", f"/api/2.0/apps/{name}/start")
-print("app", name, app.get("compute_status"), app.get("url"))
+print("app", name, app.get("compute_status"), app.get("url"), "budget policy:", app.get("effective_budget_policy_id"))
 
 env = [
     {"name": "DATABRICKS_AUTH_TYPE", "value": "pat"},  # SDK uses the PAT, not the injected SP credentials
@@ -261,11 +273,20 @@ resources = []
 if W["pat_storage"] == "secret":
     resources.append({"name": "dqx-pat", "description": "PAT used as the app back-end identity",
                       "secret": {"scope": W["secret_scope"], "key": "pat", "permission": "READ"}})
-w.api_client.do("PATCH", f"/api/2.0/apps/{name}", body={
+update = {
     "description": "DQX Studio (air-gapped build)",
     "user_api_scopes": ["sql", "catalog.catalogs:read", "catalog.schemas:read", "catalog.tables:read"],
     "resources": resources,
-})
+}
+if W["budget_policy_id"]:
+    update["budget_policy_id"] = W["budget_policy_id"]
+try:
+    w.api_client.do("PATCH", f"/api/2.0/apps/{name}", body=update)
+except Exception as e:
+    if "scope" in str(e).lower():
+        raise AssertionError(f"the app's user-authorisation scopes were refused ({e}): ask a workspace admin to "
+                             "enable user authorisation (on-behalf-of-user) for Databricks Apps, then run all again") from e
+    raise
 
 dep = w.api_client.do("POST", f"/api/2.0/apps/{name}/deployments", body={"source_code_path": APP_DIR, "mode": "SNAPSHOT"})
 for _ in range(90):
