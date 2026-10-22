@@ -112,7 +112,7 @@ Open the URL. On the first visit click **Authorize** on the consent screen.
 2. Add a rule: column `paymentMethod`, check **Allowed values**, values `'visa', 'mastercard'`, criticality **error**.
    **Quote text values.** DQX 0.16 reads an unquoted word as a column name, and the run then fails with `UNRESOLVED_COLUMN`.
 3. Save, then **Drafts & Review** > **Submit**, then **Approve**.
-4. **Run Rules** > select the table > **Run selected**. With the cluster running this takes about a minute.
+4. **Run Rules** > select the table > set **Row scope** to **All rows** (the default, *Sample rows*, checks only the first 1,000 rows) > **Run selected**. With the cluster running this takes about a minute.
 5. **Runs History** > the run. For `samples.bakehouse.sales_transactions` you should see **3,333 rows, 2,227 valid, 1,106 errors**
    (every `amex` sale fails the rule).
 
