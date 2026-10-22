@@ -1,0 +1,69 @@
+From 2f1553d440d8dd7dd9596469290aa6c5c6cd5161 Mon Sep 17 00:00:00 2001
+From: dqx-studio-airgap build <build@localhost>
+Date: Wed, 21 Oct 2026 14:09:03 +1100
+Subject: [PATCH 3/6] Air-gap build: runner on dqx 0.16.0, optional
+ start-up grant, no AI chip
+
+- tasks/pyproject.toml pinned databricks-labs-dqx==0.15.0, which conflicts with the
+  0.16.0 wheel installed on the cluster; pin 0.16.0.
+- DQX_SKIP_CATALOG_GRANT=1 skips the start-up GRANT USE CATALOG ... TO account users.
+- The home page "AI-powered rule generation" highlight follows VITE_DQX_AI_DISABLED.
+
+---
+ app/src/databricks_labs_dqx_app/backend/sql_executor.py     | 6 ++++++
+ app/src/databricks_labs_dqx_app/ui/routes/_sidebar/home.tsx | 3 ++-
+ app/tasks/pyproject.toml                                    | 2 +-
+ 3 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/app/src/databricks_labs_dqx_app/backend/sql_executor.py b/app/src/databricks_labs_dqx_app/backend/sql_executor.py
+index fdeab16a..5f81234e 100644
+--- a/app/src/databricks_labs_dqx_app/backend/sql_executor.py
++++ b/app/src/databricks_labs_dqx_app/backend/sql_executor.py
+@@ -412,6 +412,12 @@ class SqlExecutor:
+         if os.environ.get("DQX_SCHEMAS_PREEXIST") == "1" and sql.lstrip().upper().startswith("CREATE SCHEMA IF NOT EXISTS"):
+             logger.info("DQX_SCHEMAS_PREEXIST=1: skipping %s", sql)
+             return
++        # Air-gap patch: with DQX_SKIP_CATALOG_GRANT=1 the start-up
++        # ``GRANT USE CATALOG ... TO account users`` is not attempted; the install
++        # must not change catalog permissions (the catalog owner manages them).
++        if os.environ.get("DQX_SKIP_CATALOG_GRANT") == "1" and sql.lstrip().upper().startswith("GRANT USE CATALOG"):
++            logger.info("DQX_SKIP_CATALOG_GRANT=1: skipping %s", sql)
++            return
+         resp = self._ws.statement_execution.execute_statement(
+             warehouse_id=self._warehouse_id,
+             statement=sql,
+diff --git a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/home.tsx b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/home.tsx
+index aa9fa55b..77284d8b 100644
+--- a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/home.tsx
++++ b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/home.tsx
+@@ -1,4 +1,5 @@
+ import { createFileRoute, Link } from "@tanstack/react-router";
++import { AI_ENABLED } from "@/lib/features";
+ import { useTranslation } from "react-i18next";
+ import { Button } from "@/components/ui/button";
+ import {
+@@ -17,7 +18,7 @@ function LandingPage() {
+   const { t } = useTranslation();
+   const highlights = [
+     { icon: <Layers className="h-4 w-4" />, text: t("home.highlights.uc") },
+-    { icon: <Zap className="h-4 w-4" />, text: t("home.highlights.ai") },
++    ...(AI_ENABLED ? [{ icon: <Zap className="h-4 w-4" />, text: t("home.highlights.ai") }] : []),
+     { icon: <Clock className="h-4 w-4" />, text: t("home.highlights.schedule") },
+     { icon: <CheckCircle2 className="h-4 w-4" />, text: t("home.highlights.rbac") },
+   ];
+diff --git a/app/tasks/pyproject.toml b/app/tasks/pyproject.toml
+index 1568d7b8..36e889b3 100644
+--- a/app/tasks/pyproject.toml
++++ b/app/tasks/pyproject.toml
+@@ -5,7 +5,7 @@ description = "Serverless task runner for DQX Studio — executes profiler and d
+ requires-python = ">=3.12"
+ dependencies = [
+     # Keep in lockstep with the pin in app/pyproject.toml.
+-    "databricks-labs-dqx==0.15.0",
++    "databricks-labs-dqx==0.16.0",
+     "databricks-sdk~=0.120",
+ ]
+ 
+-- 
+2.54.0 (Apple Git-157)
+

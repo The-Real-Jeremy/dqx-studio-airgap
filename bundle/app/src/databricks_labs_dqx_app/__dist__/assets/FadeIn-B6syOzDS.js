@@ -1,0 +1,1 @@
+import{j as n,ce as o}from"./index-DmyUzrBa.js";function r({children:t,delay:i=0,duration:a=.5,className:e}){return n.jsx(o.div,{initial:{opacity:0,y:10},animate:{opacity:1,y:0},transition:{duration:a,delay:i,ease:"easeOut"},className:e,children:t})}export{r as F};

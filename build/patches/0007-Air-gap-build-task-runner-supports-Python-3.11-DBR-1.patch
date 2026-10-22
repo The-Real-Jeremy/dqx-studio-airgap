@@ -1,0 +1,27 @@
+From 9b2d917bfa17cb226fa5b0af097ed84928749ef5 Mon Sep 17 00:00:00 2001
+From: dqx-studio-airgap build <build@localhost>
+Date: Thu, 22 Oct 2026 14:35:51 +1100
+Subject: [PATCH] Air-gap build: task runner supports Python 3.11 (DBR 15.4
+ LTS)
+
+---
+ app/tasks/pyproject.toml | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/app/tasks/pyproject.toml b/app/tasks/pyproject.toml
+index 36e889b3..3b124911 100644
+--- a/app/tasks/pyproject.toml
++++ b/app/tasks/pyproject.toml
+@@ -2,7 +2,8 @@
+ name = "databricks-labs-dqx-task-runner"
+ version = "0.1.0"
+ description = "Serverless task runner for DQX Studio — executes profiler and dry-run jobs on Databricks compute"
+-requires-python = ">=3.12"
++# Air-gap build: 3.11 too, so the runner also works on DBR 15.4 LTS classic clusters (the code has no 3.12-only syntax).
++requires-python = ">=3.11"
+ dependencies = [
+     # Keep in lockstep with the pin in app/pyproject.toml.
+     "databricks-labs-dqx==0.16.0",
+-- 
+2.54.0 (Apple Git-157)
+

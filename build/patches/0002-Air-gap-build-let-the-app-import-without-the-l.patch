@@ -1,0 +1,40 @@
+From b3b488f287b729ac77a7a5cce39b4d9cb9fe9e73 Mon Sep 17 00:00:00 2001
+From: dqx-studio-airgap build <build@localhost>
+Date: Wed, 21 Oct 2026 13:43:11 +1100
+Subject: [PATCH 2/6] Air-gap build: let the app import without the [llm]
+ extra
+
+ai_rules_service imported databricks_langchain / langchain_core / dqx.llm (dspy)
+at module load, so the whole app failed to start without the AI extra. Guard the
+imports; every use is inside a method that only the (hidden) AI routes call.
+
+---
+ .../backend/services/ai_rules_service.py             | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/app/src/databricks_labs_dqx_app/backend/services/ai_rules_service.py b/app/src/databricks_labs_dqx_app/backend/services/ai_rules_service.py
+index 904f206b..cfebf4b8 100644
+--- a/app/src/databricks_labs_dqx_app/backend/services/ai_rules_service.py
++++ b/app/src/databricks_labs_dqx_app/backend/services/ai_rules_service.py
+@@ -9,10 +9,14 @@ from typing import Any, ClassVar
+ 
+ import yaml
+ from databricks.sdk import WorkspaceClient
+-from databricks_langchain import ChatDatabricks  # type: ignore[import-untyped]
+-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+-
+-from databricks.labs.dqx.llm.llm_utils import get_required_check_functions_definitions
++try:
++    from databricks_langchain import ChatDatabricks  # type: ignore[import-untyped]
++    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
++
++    from databricks.labs.dqx.llm.llm_utils import get_required_check_functions_definitions
++except ImportError:  # Air-gap build: no [llm] extra (no FMAPI); the AI routes are unused and the UI hides them.
++    ChatDatabricks = AIMessage = BaseMessage = HumanMessage = SystemMessage = None  # type: ignore[assignment,misc]
++    get_required_check_functions_definitions = None  # type: ignore[assignment]
+ 
+ from databricks_labs_dqx_app.backend.config import conf
+ 
+-- 
+2.54.0 (Apple Git-157)
+

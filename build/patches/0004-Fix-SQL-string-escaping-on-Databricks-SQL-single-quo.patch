@@ -1,0 +1,61 @@
+From ae14afafc1a4a8b691309669acfa56264b8d5c9e Mon Sep 17 00:00:00 2001
+From: dqx-studio-airgap build <build@localhost>
+Date: Wed, 21 Oct 2026 14:41:33 +1100
+Subject: [PATCH 4/6] Fix SQL string escaping on Databricks SQL (single quotes
+ were silently dropped)
+
+escape_sql_string doubled single quotes (''), but Databricks SQL parses 'a''b' as
+two adjacent literals and returns ab (measured on a SQL warehouse). Every quote in
+a value written through the Delta path was lost, e.g. the quoted is_in_list
+literals DQX 0.16 requires ('PP30'), which then ran as column references.
+Backslash-escape instead (backslash first, then quote). Postgres keeps the ''
+form via escape_pg_string.
+
+---
+ .../databricks_labs_dqx_app/backend/pg_executor.py |  2 +-
+ .../databricks_labs_dqx_app/backend/sql_utils.py   | 14 +++++++++++---
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/app/src/databricks_labs_dqx_app/backend/pg_executor.py b/app/src/databricks_labs_dqx_app/backend/pg_executor.py
+index d16af06a..22e9f521 100644
+--- a/app/src/databricks_labs_dqx_app/backend/pg_executor.py
++++ b/app/src/databricks_labs_dqx_app/backend/pg_executor.py
+@@ -54,7 +54,7 @@ from databricks_labs_dqx_app.backend.pg_cursor_helpers import (
+     run_trusted_sql,
+ )
+ from databricks_labs_dqx_app.backend.sql_executor import RawSql, _render_value
+-from databricks_labs_dqx_app.backend.sql_utils import escape_sql_string
++from databricks_labs_dqx_app.backend.sql_utils import escape_pg_string as escape_sql_string
+ 
+ logger = logging.getLogger(__name__)
+ 
+diff --git a/app/src/databricks_labs_dqx_app/backend/sql_utils.py b/app/src/databricks_labs_dqx_app/backend/sql_utils.py
+index 368fd116..ba5ab2a0 100644
+--- a/app/src/databricks_labs_dqx_app/backend/sql_utils.py
++++ b/app/src/databricks_labs_dqx_app/backend/sql_utils.py
+@@ -18,11 +18,19 @@ _SCHEDULE_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
+ 
+ 
+ def escape_sql_string(value: str) -> str:
+-    """Escape a value for embedding in a SQL single-quoted string literal.
++    """Escape a value for embedding in a Databricks SQL single-quoted string literal.
+ 
+-    Databricks SQL uses doubled single-quotes ('') for escaping,
+-    NOT backslash-escape (\\'). This function normalizes to the correct form.
++    Air-gap patch: Databricks SQL does NOT read ``''`` as an escaped quote; it
++    parses ``'a''b'`` as two adjacent literals and concatenates them to ``ab``
++    (measured on a SQL warehouse), so the previous ``''`` form silently dropped every
++    single quote, e.g. the quoted ``is_in_list`` literals DQX 0.16 requires. The
++    backslash is the escape character, so escape it first, then the quote.
+     """
++    return value.replace("\\", "\\\\").replace("'", "\\'")
++
++
++def escape_pg_string(value: str) -> str:
++    """Escape a value for a Postgres single-quoted literal (standard strings: ``''``)."""
+     return value.replace("'", "''")
+ 
+ 
+-- 
+2.54.0 (Apple Git-157)
+

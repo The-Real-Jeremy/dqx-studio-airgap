@@ -1,0 +1,197 @@
+From abe15de9e40daa5d5217d5bc391bd39cf98c01d4 Mon Sep 17 00:00:00 2001
+From: dqx-studio-airgap build <build@localhost>
+Date: Wed, 21 Oct 2026 13:19:15 +1100
+Subject: [PATCH 1/6] Air-gap build: skip CREATE SCHEMA, compile out AI
+ and contract import
+
+- DQX_SCHEMAS_PREEXIST=1 makes SqlExecutor.execute_no_schema skip every
+  CREATE SCHEMA IF NOT EXISTS (the deployer cannot create schemas).
+- VITE_DQX_AI_DISABLED=1 hides the AI assistant, the AI generation cards and
+  the LLM primary-key toggle (no Foundation Model APIs).
+- VITE_DQX_CONTRACTS_DISABLED=1 hides the data-contract import tab (the
+  [datacontract] extra is not vendored).
+Unset, all three behave exactly like stock.
+
+---
+ .../databricks_labs_dqx_app/backend/sql_executor.py  |  7 +++++++
+ .../ui/components/AIAssistantProvider.tsx            |  2 ++
+ app/src/databricks_labs_dqx_app/ui/lib/features.ts   |  5 +++++
+ .../ui/routes/_sidebar/profiler.tsx                  |  3 +++
+ .../ui/routes/_sidebar/rules.create-sql.tsx          |  5 +++++
+ .../ui/routes/_sidebar/rules.import.tsx              | 12 ++++++++----
+ .../ui/routes/_sidebar/rules.single-table.tsx        |  3 +++
+ 7 files changed, 33 insertions(+), 4 deletions(-)
+ create mode 100644 app/src/databricks_labs_dqx_app/ui/lib/features.ts
+
+diff --git a/app/src/databricks_labs_dqx_app/backend/sql_executor.py b/app/src/databricks_labs_dqx_app/backend/sql_executor.py
+index 9c2ec750..fdeab16a 100644
+--- a/app/src/databricks_labs_dqx_app/backend/sql_executor.py
++++ b/app/src/databricks_labs_dqx_app/backend/sql_executor.py
+@@ -9,6 +9,7 @@ makes services testable via ``create_autospec(SqlExecutor)``.
+ from __future__ import annotations
+ 
+ import logging
++import os
+ import time
+ from typing import Any, Protocol, runtime_checkable
+ 
+@@ -405,6 +406,12 @@ class SqlExecutor:
+         Used for ``CREATE SCHEMA`` and other bootstrap DDL that must run
+         before the target schema exists.
+         """
++        # Air-gap patch: the deployer cannot create schemas, so with
++        # DQX_SCHEMAS_PREEXIST=1 every ``CREATE SCHEMA IF NOT EXISTS`` (migrations,
++        # tmp schema, view service, scheduler) is skipped; the schemas must exist.
++        if os.environ.get("DQX_SCHEMAS_PREEXIST") == "1" and sql.lstrip().upper().startswith("CREATE SCHEMA IF NOT EXISTS"):
++            logger.info("DQX_SCHEMAS_PREEXIST=1: skipping %s", sql)
++            return
+         resp = self._ws.statement_execution.execute_statement(
+             warehouse_id=self._warehouse_id,
+             statement=sql,
+diff --git a/app/src/databricks_labs_dqx_app/ui/components/AIAssistantProvider.tsx b/app/src/databricks_labs_dqx_app/ui/components/AIAssistantProvider.tsx
+index 49304852..5013bc80 100644
+--- a/app/src/databricks_labs_dqx_app/ui/components/AIAssistantProvider.tsx
++++ b/app/src/databricks_labs_dqx_app/ui/components/AIAssistantProvider.tsx
+@@ -1,4 +1,5 @@
+ import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
++import { AI_ENABLED } from "@/lib/features";
+ import { Sparkles } from "lucide-react";
+ import { useTranslation } from "react-i18next";
+ import { Button } from "@/components/ui/button";
+@@ -35,6 +36,7 @@ export function useAIAssistant() {
+ export function AIAssistantTrigger() {
+   const { t } = useTranslation();
+   const { setOpen } = useAIAssistant();
++  if (!AI_ENABLED) return null;
+   return (
+     <Button
+       variant="outline"
+diff --git a/app/src/databricks_labs_dqx_app/ui/lib/features.ts b/app/src/databricks_labs_dqx_app/ui/lib/features.ts
+new file mode 100644
+index 00000000..09fbc967
+--- /dev/null
++++ b/app/src/databricks_labs_dqx_app/ui/lib/features.ts
+@@ -0,0 +1,5 @@
++// Air-gap build switches, read at build time (see build/build_bundle.sh).
++// Unset in a stock build, so every feature stays on.
++// AI features need Foundation Model APIs; contract import needs the [datacontract] extra.
++export const AI_ENABLED = import.meta.env.VITE_DQX_AI_DISABLED !== "1";
++export const CONTRACTS_ENABLED = import.meta.env.VITE_DQX_CONTRACTS_DISABLED !== "1";
+diff --git a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/profiler.tsx b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/profiler.tsx
+index 4470f7fa..440f3038 100644
+--- a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/profiler.tsx
++++ b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/profiler.tsx
+@@ -1,4 +1,5 @@
+ import { createFileRoute, Link, Navigate } from "@tanstack/react-router";
++import { AI_ENABLED } from "@/lib/features";
+ import { formatDateTime as formatDate } from "@/lib/format-utils";
+ import { useState, useCallback, useEffect, useRef, useMemo, Suspense, type ReactNode } from "react";
+ import { useTranslation } from "react-i18next";
+@@ -1080,6 +1081,7 @@ function ProfilerPageInner() {
+                   </div>
+                 )}
+ 
++                {AI_ENABLED && (
+                 <div className="flex items-center justify-between">
+                   <div className="grid gap-0.5">
+                     <Label htmlFor="llm-pk">{t("profiler.llmPkDetection")}</Label>
+@@ -1094,6 +1096,7 @@ function ProfilerPageInner() {
+                     disabled={isBusy}
+                   />
+                 </div>
++                )}
+               </div>
+             )}
+           </div>
+diff --git a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.create-sql.tsx b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.create-sql.tsx
+index 8eebdf71..dad06c9b 100644
+--- a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.create-sql.tsx
++++ b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.create-sql.tsx
+@@ -1,4 +1,5 @@
+ import { createFileRoute, useNavigate, Navigate } from "@tanstack/react-router";
++import { AI_ENABLED } from "@/lib/features";
+ import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
+ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+ import { useTranslation } from "react-i18next";
+@@ -549,6 +550,8 @@ function CreateSqlCheckPageInner() {
+         </div>
+       </div>
+ 
++      {AI_ENABLED && (
++      <>
+       {/* AI generation */}
+       <Card>
+         <CardContent className="pt-6">
+@@ -591,6 +594,8 @@ function CreateSqlCheckPageInner() {
+           </div>
+         </CardContent>
+       </Card>
++      </>
++      )}
+ 
+       <div className="space-y-4">
+         {checks.map((check, idx) => {
+diff --git a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.import.tsx b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.import.tsx
+index ce105585..ecffff42 100644
+--- a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.import.tsx
++++ b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.import.tsx
+@@ -1,4 +1,5 @@
+ import { createFileRoute, useNavigate, Navigate } from "@tanstack/react-router";
++import { CONTRACTS_ENABLED } from "@/lib/features";
+ import { useState, useRef, useCallback, useMemo } from "react";
+ import { useTranslation } from "react-i18next";
+ import { usePermissions } from "@/hooks/use-permissions";
+@@ -88,6 +89,7 @@ interface ImportSearchParams {
+ }
+ 
+ function _coerceTab(value: unknown): ImportTab | undefined {
++  if (value === "contract" && !CONTRACTS_ENABLED) return "yaml";
+   return value === "yaml" || value === "contract" ? value : undefined;
+ }
+ 
+@@ -172,10 +174,12 @@ function ImportRulesPageInner() {
+             <FileCode2 className="h-3.5 w-3.5" />
+             {t("rulesImport.tabYaml")}
+           </TabsTrigger>
+-          <TabsTrigger value="contract" className="gap-2">
+-            <FileText className="h-3.5 w-3.5" />
+-            {t("rulesImport.tabContract")}
+-          </TabsTrigger>
++          {CONTRACTS_ENABLED && (
++            <TabsTrigger value="contract" className="gap-2">
++              <FileText className="h-3.5 w-3.5" />
++              {t("rulesImport.tabContract")}
++            </TabsTrigger>
++          )}
+         </TabsList>
+ 
+         <TabsContent value="yaml" className="mt-4">
+diff --git a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.single-table.tsx b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.single-table.tsx
+index 6ed8dc1c..1012b209 100644
+--- a/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.single-table.tsx
++++ b/app/src/databricks_labs_dqx_app/ui/routes/_sidebar/rules.single-table.tsx
+@@ -1,4 +1,5 @@
+ import { createFileRoute, useNavigate, Navigate } from "@tanstack/react-router";
++import { AI_ENABLED } from "@/lib/features";
+ import { useUnsavedGuard } from "@/hooks/use-unsaved-guard";
+ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+ import { useTranslation, Trans } from "react-i18next";
+@@ -1228,6 +1229,7 @@ function UnifiedRulesPageInner() {
+         </CardHeader>
+         <CardContent className="space-y-5">
+           {/* AI generation */}
++          {AI_ENABLED && (
+           <div className="border border-violet-200 dark:border-violet-800 rounded-lg p-4 bg-violet-50/50 dark:bg-violet-950/30 space-y-3">
+             <div className="flex items-center gap-2 mb-1">
+               <Sparkles className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+@@ -1272,6 +1274,7 @@ function UnifiedRulesPageInner() {
+               </Button>
+             </div>
+           </div>
++          )}
+ 
+           {/* Two-column row: check editor on the left, column discovery
+               side panel on the right. On smaller viewports the panel
+-- 
+2.54.0 (Apple Git-157)
+

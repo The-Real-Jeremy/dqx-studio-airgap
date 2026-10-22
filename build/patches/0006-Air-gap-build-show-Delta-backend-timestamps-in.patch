@@ -1,0 +1,53 @@
+From 58f53411ca2e39bea22972b92fa39f6accac1ebd Mon Sep 17 00:00:00 2001
+From: dqx-studio-airgap build <build@localhost>
+Date: Wed, 21 Oct 2026 15:18:46 +1100
+Subject: [PATCH 6/6] Air-gap build: show Delta-backend timestamps in the
+ right time zone
+
+The Delta path returns "YYYY-MM-DD HH:MM:SS.ffffff" (UTC, no zone); new Date()
+parsed it as browser-local, so Runs History showed 20 Oct 17:15 for a run at
+21 Oct 04:15 UTC (viewer at UTC+11). Treat zone-less timestamps as UTC.
+
+---
+ .../databricks_labs_dqx_app/ui/lib/format-utils.ts | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/app/src/databricks_labs_dqx_app/ui/lib/format-utils.ts b/app/src/databricks_labs_dqx_app/ui/lib/format-utils.ts
+index e5e31aa2..818eb0df 100644
+--- a/app/src/databricks_labs_dqx_app/ui/lib/format-utils.ts
++++ b/app/src/databricks_labs_dqx_app/ui/lib/format-utils.ts
+@@ -1,3 +1,13 @@
++// Air-gap patch: on the Delta backend the API returns timestamps such as
++// "2026-10-21 04:15:57.016557" (UTC, no zone designator). new Date() reads those as
++// browser-local time, shifting every displayed time by the viewer's UTC offset.
++// Treat a timestamp without a zone as UTC.
++function parseApiTimestamp(iso: string): Date {
++  const s = iso.trim();
++  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) return new Date(s.replace(" ", "T") + "Z");
++  return new Date(s);
++}
++
+ export function parseFqn(fqn: string) {
+   const parts = fqn.split(".");
+   return { catalog: parts[0] || "", schema: parts[1] || "", table: parts[2] || "" };
+@@ -24,7 +34,7 @@ export function getDisplayTimezone(): string {
+ export function formatDateShort(iso: string | null | undefined): string {
+   if (!iso) return "—";
+   try {
+-    const d = new Date(iso);
++    const d = parseApiTimestamp(iso);
+     if (isNaN(d.getTime())) return "—";
+     const tz = _displayTimezone;
+     return d.toLocaleDateString(undefined, {
+@@ -41,7 +51,7 @@ export function formatDateShort(iso: string | null | undefined): string {
+ export function formatDateTime(iso: string | null | undefined): string {
+   if (!iso) return "—";
+   try {
+-    const d = new Date(iso);
++    const d = parseApiTimestamp(iso);
+     if (isNaN(d.getTime())) return "—";
+     const tz = _displayTimezone;
+     return d.toLocaleDateString(undefined, {
+-- 
+2.54.0 (Apple Git-157)
+

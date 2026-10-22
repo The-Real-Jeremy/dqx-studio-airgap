@@ -1,0 +1,7 @@
+fastapi~=0.119
+pydantic-settings~=2.11
+uvicorn~=0.37
+databricks-labs-dqx[cli]==0.16.0
+databricks-sdk~=0.120
+databricks-sql-connector[pyarrow]==4.2.5
+openpyxl>=3.1
