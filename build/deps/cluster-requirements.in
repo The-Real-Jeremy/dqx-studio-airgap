@@ -1,2 +1,4 @@
 databricks-labs-dqx==0.16.0
 databricks-sdk~=0.120
+# protobuf<5: DBR 15.4/16.4 ship protobuf 4.24.1, and mlflow-skinny, google-api-core and proto-plus in the runtime need <5.
+protobuf<5

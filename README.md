@@ -37,9 +37,9 @@ principal; read [PAT exposure](#pat-exposure) before using it.
 | An existing **volume** where you have READ VOLUME and WRITE VOLUME | Only to upload the repo zip. Creating a volume needs CREATE VOLUME, which you may not have; ask the schema owner for one, or use a Git folder (step 3, option B) |
 | An existing **SQL warehouse** you can use (CAN USE) | Studio reads and writes its tables through it |
 | Permission to **create a Databricks App** and a **job** | |
-| Permission to **create a PAT** | If PATs are disabled for you, this build cannot be used |
+| Permission to **create a PAT** | Confirmed available in the target workspace. If PATs are disabled for you, this build cannot be used |
 
-The cluster wheels cover Python 3.11 (DBR 15.4 LTS) and 3.12 (DBR 16.4 LTS). Another DBR needs a rebuild with its Python version. The app side does not depend on the cluster.
+The cluster wheels cover Python 3.11 (DBR 15.4 LTS) and 3.12 (DBR 16.4 LTS), and keep protobuf below 5 so the runtime's own mlflow-skinny and Google API packages are not broken. Another DBR needs a rebuild with its Python version. The app side does not depend on the cluster.
 
 ## Install: step by step
 

@@ -9,7 +9,7 @@ databricks-sdk==0.120.0
 google-auth==2.53.0
 greenlet==3.5.1
 idna==3.18
-protobuf==6.33.6
+protobuf==4.25.9
 pyasn1==0.6.3
 pyasn1-modules==0.4.2
 pycparser==3.0
