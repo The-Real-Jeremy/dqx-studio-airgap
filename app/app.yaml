@@ -1,0 +1,20 @@
+# DQX Studio (child and PAT edition). The DEPLOY notebook rewrites this file with the workspace's values;
+# the copy in the repo only shows the shape. No token is ever written here: each user enters their own PAT in the app.
+command: ["python", "-m", "uvicorn", "databricks_labs_dqx_app.backend.app:app", "--app-dir", "src", "--workers", "1"]
+env:
+  - name: DQX_BROWSER_PAT
+    value: "1"
+  - name: DQX_SCHEMAS_PREEXIST
+    value: "1"
+  - name: DQX_SKIP_CATALOG_GRANT
+    value: "1"
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "<set by DEPLOY>"
+  - name: DQX_CATALOG
+    value: "<set by DEPLOY>"
+  - name: DQX_SCHEMA
+    value: "<set by DEPLOY>"
+  - name: DQX_TMP_SCHEMA
+    value: "<set by DEPLOY>"
+  - name: DQX_JOB_ID
+    value: "<set by DEPLOY>"

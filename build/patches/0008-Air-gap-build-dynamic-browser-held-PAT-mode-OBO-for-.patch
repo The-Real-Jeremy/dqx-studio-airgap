@@ -1,0 +1,486 @@
+From 954b0cc9d435dddb3a9ac65a1f8afec248a085ae Mon Sep 17 00:00:00 2001
+From: dqx-studio-airgap build <build@localhost>
+Date: Thu, 5 Nov 2026 20:06:05 +1100
+Subject: [PATCH 8/9] Air-gap build: dynamic (browser-held) PAT mode, OBO for
+ SQL, per-user access check
+
+DQX_BROWSER_PAT=1: each user's own PAT is sealed (AES-GCM) into an HttpOnly, Secure, SameSite=Strict cookie and used
+only for the Jobs API; Studio's tables are read and written with the viewer's OBO token; start-up migrations and the
+in-app scheduler are skipped (the DEPLOY notebook migrates; the scheduler is disabled in dynamic PAT mode).
+GET /api/v1/access-check lists what the viewer is missing with the exact fix.
+---
+ .../backend/access_check.py                   | 137 ++++++++++++++
+ .../databricks_labs_dqx_app/backend/app.py    |  11 ++
+ .../backend/browser_pat.py                    | 174 ++++++++++++++++++
+ .../backend/dependencies.py                   |  24 ++-
+ .../backend/routes/v1/__init__.py             |   4 +
+ .../backend/routes/v1/roles.py                |   4 +-
+ .../backend/routes/v1/schedules.py            |   8 +
+ 7 files changed, 355 insertions(+), 7 deletions(-)
+ create mode 100644 app/src/databricks_labs_dqx_app/backend/access_check.py
+ create mode 100644 app/src/databricks_labs_dqx_app/backend/browser_pat.py
+
+diff --git a/app/src/databricks_labs_dqx_app/backend/access_check.py b/app/src/databricks_labs_dqx_app/backend/access_check.py
+new file mode 100644
+index 00000000..2d254ca9
+--- /dev/null
++++ b/app/src/databricks_labs_dqx_app/backend/access_check.py
+@@ -0,0 +1,137 @@
++"""Per-user access check (air-gap build): what the signed-in user is missing to use Studio, each with the exact fix.
++
++``GET /api/v1/access-check`` runs small, side-effect-free probes as the viewer:
++  - SQL warehouse: ``SELECT 1`` on the configured warehouse (CAN USE)
++  - Studio's schema: read one Studio table (USE CATALOG, USE SCHEMA, SELECT), a no-op ``DELETE ... WHERE false``
++    (MODIFY), and create + drop a probe view (CREATE TABLE, which every run needs for its temp view)
++  - the task-runner job, with the viewer's own PAT: can they see it, and do they hold CAN MANAGE RUN
++  - the PAT itself (missing / expired)
++Each result is ok / missing / unknown. "unknown" means the probe could not decide; it is never shown as a pass.
++"""
++
++from __future__ import annotations
++
++import hashlib
++import os
++from typing import Annotated, Any
++
++from databricks.sdk import WorkspaceClient
++from databricks.sdk.service.sql import StatementState
++from fastapi import APIRouter, Header, HTTPException, Request
++
++from . import browser_pat
++from .config import conf
++from .logger import logger
++
++router = APIRouter()
++_RUN_LEVELS = {"CAN_MANAGE_RUN", "CAN_MANAGE", "IS_OWNER"}
++
++
++def _q(name: str) -> str:
++    return "`" + name.replace("`", "") + "`"
++
++
++def _sql(ws: WorkspaceClient, warehouse_id: str, statement: str) -> tuple[bool, str]:
++    r = ws.statement_execution.execute_statement(warehouse_id=warehouse_id, statement=statement, wait_timeout="30s")
++    st = r.status.state if r.status else None
++    if st == StatementState.SUCCEEDED:
++        return True, ""
++    err = (r.status.error.message if r.status and r.status.error else "") or str(st)
++    return False, err
++
++
++def _item(check: str, ok: bool | None, detail: str, fix: str = "") -> dict[str, Any]:
++    return {"check": check, "status": {True: "ok", False: "missing", None: "unknown"}[ok], "detail": detail, "fix": fix}
++
++
++@router.get("/access-check", operation_id="accessCheck")
++def access_check(
++    request: Request,
++    x_forwarded_email: Annotated[str | None, Header()] = None,
++    x_forwarded_access_token: Annotated[str | None, Header(alias="X-Forwarded-Access-Token")] = None,
++) -> dict[str, Any]:
++    me = x_forwarded_email or "you"
++    cat, sch = conf.catalog, conf.schema_name
++    fq = f"{_q(cat)}.{_q(sch)}"
++    wh = os.environ.get("DATABRICKS_WAREHOUSE_ID") or os.environ.get("DATABRICKS_SQL_WAREHOUSE_ID") or ""
++    out: list[dict[str, Any]] = []
++    if not x_forwarded_access_token:
++        raise HTTPException(status_code=401, detail="Sign in again: the app did not receive your identity.")
++    obo = WorkspaceClient(token=x_forwarded_access_token, auth_type="pat")
++
++    # 1. warehouse
++    try:
++        ok, err = _sql(obo, wh, "SELECT 1")
++        out.append(_item("SQL warehouse (CAN USE)", ok, "can run queries" if ok else err[:300],
++                         "" if ok else f"Ask the warehouse owner: SQL Warehouses > the warehouse (id {wh}) > Permissions > "
++                                       f"add {me} (or the group 'users') with 'Can use'."))
++    except Exception as e:  # e.g. PermissionDenied on the warehouse itself
++        out.append(_item("SQL warehouse (CAN USE)", False, str(e)[:300],
++                         f"Ask the warehouse owner: SQL Warehouses > the warehouse (id {wh}) > Permissions > add {me} with 'Can use'."))
++    warehouse_ok = out[-1]["status"] == "ok"
++
++    grants = (f"GRANT USE CATALOG ON CATALOG {_q(cat)} TO `{me}`;\n"
++              f"GRANT USE SCHEMA, CREATE TABLE ON SCHEMA {fq} TO `{me}`;\n"
++              f"-- and on each of Studio's dq_* tables: GRANT SELECT, MODIFY ON TABLE {fq}.<table> TO `{me}`;\n"
++              "(the DEPLOY notebook prints the full list, and can apply it for every user)")
++    if warehouse_ok:
++        # 2. read (USE CATALOG + USE SCHEMA + SELECT)
++        ok, err = _sql(obo, wh, f"SELECT 1 FROM {fq}.dq_quality_rules LIMIT 0")
++        out.append(_item("Read Studio's tables (USE CATALOG, USE SCHEMA, SELECT)", ok, "ok" if ok else err[:300],
++                         "" if ok else "Ask the owner of the schema to run:\n" + grants))
++        # 3. write (MODIFY); a DELETE that matches nothing changes no data
++        if ok:
++            ok2, err2 = _sql(obo, wh, f"DELETE FROM {fq}.dq_comments WHERE 1 = 0")
++            out.append(_item("Write Studio's tables (MODIFY)", ok2, "ok" if ok2 else err2[:300],
++                             "" if ok2 else "Ask the owner of the schema (or the DEPLOY installer) to run:\n" + grants))
++        # 4. create the per-run temporary view (CREATE TABLE on the schema)
++        probe = "dqx_access_probe_" + hashlib.sha256(me.encode()).hexdigest()[:10]
++        ok3, err3 = _sql(obo, wh, f"CREATE OR REPLACE VIEW {fq}.{probe} AS SELECT 1 AS x")
++        if ok3:
++            _sql(obo, wh, f"DROP VIEW IF EXISTS {fq}.{probe}")
++        out.append(_item("Create the per-run view (CREATE TABLE on the schema)", ok3, "ok" if ok3 else err3[:300],
++                         "" if ok3 else f"Ask the owner of the schema to run:\nGRANT CREATE TABLE ON SCHEMA {fq} TO `{me}`;"))
++    else:
++        out.append(_item("Studio's schema and tables", None, "not checked: needs the SQL warehouse first", ""))
++
++    # 5. PAT + job
++    job_name = os.environ.get("DQX_JOB_NAME") or f"job {conf.job_id}"
++    if browser_pat.enabled():
++        try:
++            pat_ws = browser_pat.ws_from_cookie(request, x_forwarded_email)
++            out.append(_item("Personal access token", True, "saved in this browser and working"))
++        except HTTPException as e:
++            msg = e.detail.get("message") if isinstance(e.detail, dict) else str(e.detail)
++            out.append(_item("Personal access token", False, msg,
++                             "Click 'Enter token' and paste a PAT from Settings > Developer > Access tokens."))
++            pat_ws = None
++    else:
++        pat_ws = None
++    if pat_ws is not None and conf.job_id:
++        try:
++            pat_ws.jobs.get(int(conf.job_id))
++            level = None
++            try:
++                acl = pat_ws.api_client.do("GET", f"/api/2.0/permissions/jobs/{conf.job_id}")
++                me_obj = pat_ws.current_user.me()
++                groups = {g.display for g in (me_obj.groups or []) if g.display} | {"users"}
++                for e in acl.get("access_control_list", []):
++                    if e.get("user_name", "").lower() == me.lower() or e.get("group_name") in groups:
++                        for p in e.get("all_permissions", []):
++                            if p.get("permission_level") in _RUN_LEVELS:
++                                level = p["permission_level"]
++                ok = level is not None
++                detail = f"you hold {level}" if ok else "you can see the job but cannot run it"
++            except Exception as e:  # reading the ACL can itself be refused; then we cannot tell
++                ok, detail = None, f"could not read the job's permissions ({type(e).__name__})"
++            out.append(_item(f"Run the task-runner job (CAN MANAGE RUN on {job_name})", ok, detail,
++                             "" if ok else "Ask the installer to re-run DEPLOY (grant_job_run_to_users = yes), or: Jobs & "
++                                           f"Pipelines > {job_name} > Permissions > add {me} with 'Can Manage Run'."))
++        except Exception as e:
++            out.append(_item(f"Run the task-runner job (CAN MANAGE RUN on {job_name})", False,
++                             f"you cannot see the job ({type(e).__name__})",
++                             "Ask the installer to re-run DEPLOY (grant_job_run_to_users = yes), or: Jobs & Pipelines > "
++                             f"{job_name} > Permissions > add {me} with 'Can Manage Run'."))
++    missing = [i for i in out if i["status"] == "missing"]
++    logger.info("access check for %s: %d missing, %d unknown", me, len(missing), sum(i["status"] == "unknown" for i in out))
++    return {"user": me, "all_ok": not missing and all(i["status"] == "ok" for i in out), "checks": out}
+diff --git a/app/src/databricks_labs_dqx_app/backend/app.py b/app/src/databricks_labs_dqx_app/backend/app.py
+index 0183aae3..bdb95e79 100644
+--- a/app/src/databricks_labs_dqx_app/backend/app.py
++++ b/app/src/databricks_labs_dqx_app/backend/app.py
+@@ -202,6 +202,17 @@ async def _update_job_wheels(sp_ws: WorkspaceClient, job_id: str, wheel_paths: l
+ async def lifespan(app: FastAPI):
+     logger.info(f"Starting app with configuration:\n{conf.model_dump_json(indent=2)}")
+ 
++    # Air-gap build, DQX_BROWSER_PAT=1: there is no server-side credential (each user's PAT lives only in their
++    # browser), so nothing runs at start-up as the app. Migrations were applied by the DEPLOY notebook as the
++    # installer, and the in-app scheduler is off (schedules would need a stored credential).
++    from . import browser_pat
++
++    if browser_pat.enabled():
++        logger.info("Browser-held PAT mode: start-up migrations and the scheduler are skipped (run DEPLOY to migrate).")
++        set_oltp_executor(None)
++        yield
++        return
++
+     # Service-principal auth and database migrations are required for the app to
+     # function correctly.  Failure here is fatal: a partial-state app silently
+     # surfaces confusing SQL errors on every request, so we'd rather fail loudly
+diff --git a/app/src/databricks_labs_dqx_app/backend/browser_pat.py b/app/src/databricks_labs_dqx_app/backend/browser_pat.py
+new file mode 100644
+index 00000000..49725727
+--- /dev/null
++++ b/app/src/databricks_labs_dqx_app/backend/browser_pat.py
+@@ -0,0 +1,174 @@
++"""Browser-held PAT mode (``DQX_BROWSER_PAT=1``) for workspaces where the app's service principal has no grants.
++
++Each user enters their own personal access token once. The back end checks that it belongs to the signed-in
++viewer, seals it (AES-GCM, key derived from the app's own client secret) and returns it as an HttpOnly, Secure,
++SameSite=Strict cookie. Page JavaScript cannot read it, and nothing about it is kept in the container, env, logs
++or tables. On every request that needs it, the cookie is unsealed in memory and used only for the Jobs API
++(``run_now`` / ``get_run`` / ``cancel``) and the admin group list. Everything SQL / Unity Catalog runs on the
++viewer's own on-behalf-of token. A PAT that stops working (expired or revoked) clears the cookie and asks again.
++"""
++
++from __future__ import annotations
++
++import base64
++import hashlib
++import json
++import os
++import secrets
++import time
++from typing import Annotated
++
++from cryptography.hazmat.primitives import hashes
++from cryptography.hazmat.primitives.ciphers.aead import AESGCM
++from cryptography.hazmat.primitives.kdf.hkdf import HKDF
++from databricks.sdk import WorkspaceClient
++from databricks.sdk.errors import PermissionDenied, Unauthenticated
++from fastapi import APIRouter, Header, HTTPException, Request, Response
++from pydantic import BaseModel
++
++from .logger import logger
++
++COOKIE = "dqx_studio_pat"
++MAX_AGE_S = 30 * 24 * 3600  # a forgotten browser does not hold a PAT for ever
++_AAD = b"dqx-studio-browser-pat-v1"
++_CHECK_TTL_S = 300  # re-validate a PAT with Databricks at most every 5 minutes per user
++_KEY: bytes | None = None
++
++
++def enabled() -> bool:
++    return os.environ.get("DQX_BROWSER_PAT", "").strip().lower() in ("1", "true", "yes")
++
++
++def _key() -> bytes:
++    """32-byte key. Derived from the app's client secret, so it survives restarts and never leaves the container."""
++    global _KEY  # noqa: PLW0603
++    if _KEY is None:
++        secret = os.environ.get("DATABRICKS_CLIENT_SECRET", "")
++        if secret:
++            info = (os.environ.get("DATABRICKS_APP_NAME") or "dqx-studio").encode()
++            _KEY = HKDF(algorithm=hashes.SHA256(), length=32, salt=_AAD, info=info).derive(secret.encode())
++        else:  # local dev: a per-process key (cookies stop working on restart, which is fine locally)
++            _KEY = AESGCM.generate_key(bit_length=256)
++    return _KEY
++
++
++
++def seal(pat: str, email: str) -> str:
++    nonce = secrets.token_bytes(12)
++    blob = json.dumps({"t": pat, "e": email.lower(), "iat": int(time.time())}).encode()
++    return base64.urlsafe_b64encode(nonce + AESGCM(_key()).encrypt(nonce, blob, _AAD)).decode().rstrip("=")
++
++
++def unseal(value: str) -> dict | None:
++    try:
++        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
++        return json.loads(AESGCM(_key()).decrypt(raw[:12], raw[12:], _AAD))
++    except Exception:  # tampered, from another app, or sealed under a key that has since changed
++        return None
++
++
++def _cookie_header(value: str, max_age: int) -> str:
++    # Path=/ : standalone the app owns the origin; as a catalog child the catalog rewrites Path to the child's prefix
++    # (prefix mode). SameSite=Strict: never sent on a cross-site request.
++    return f"{COOKIE}={value}; Max-Age={max_age}; Path=/; HttpOnly; Secure; SameSite=Strict"
++
++
++CLEAR_COOKIE = _cookie_header("", 0)
++
++
++def _host() -> str:
++    h = os.environ.get("DATABRICKS_HOST", "")
++    return h if h.startswith("http") else f"https://{h}"
++
++
++def _client(pat: str) -> WorkspaceClient:
++    return WorkspaceClient(host=_host(), token=pat, auth_type="pat")
++
++
++def _pat_user(pat: str) -> str:
++    """The PAT's own user name; raises Unauthenticated/PermissionDenied if it does not work."""
++    return (_client(pat).current_user.me().user_name or "").lower()
++
++
++_checked: dict[str, float] = {}  # sha256(pat) -> time last confirmed working (no PAT values kept)
++
++
++def need_pat(code: str, message: str) -> HTTPException:
++    return HTTPException(status_code=401, detail={"code": code, "message": message}, headers={"Set-Cookie": CLEAR_COOKIE})
++
++
++def ws_from_cookie(request: Request, viewer_email: str | None) -> WorkspaceClient:
++    """WorkspaceClient for this request, built from the viewer's own sealed PAT cookie."""
++    sealed = request.cookies.get(COOKIE)
++    data = unseal(sealed) if sealed else None
++    if not data or not data.get("t"):
++        raise need_pat("pat_required", "Enter your personal access token to run DQX jobs.")
++    if viewer_email and data.get("e") != viewer_email.lower():
++        raise need_pat("pat_required", "The saved token belongs to another user. Enter your own personal access token.")
++    pat = data["t"]
++    h = hashlib.sha256(pat.encode()).hexdigest()
++    if time.time() - _checked.get(h, 0) > _CHECK_TTL_S:
++        try:
++            _pat_user(pat)
++        except (Unauthenticated, PermissionDenied):
++            _checked.pop(h, None)
++            raise need_pat("pat_expired", "Your personal access token has expired or been revoked. Enter a new one.")
++        _checked[h] = time.time()
++    request.state.used_browser_pat = True
++    return _client(pat)
++
++
++# ── API ──────────────────────────────────────────────────────────────────────────────────────────────────────
++
++router = APIRouter()
++
++
++class PatIn(BaseModel):
++    pat: str
++
++
++@router.get("/pat/status", operation_id="getPatStatus")
++def pat_status(request: Request, x_forwarded_email: Annotated[str | None, Header()] = None) -> dict:
++    if not enabled():
++        return {"mode": "service_principal", "has_pat": True, "valid": True, "schedules": "on"}
++    data = unseal(request.cookies.get(COOKIE, "")) if request.cookies.get(COOKIE) else None
++    mine = bool(data and (not x_forwarded_email or data.get("e") == x_forwarded_email.lower()))
++    valid = False
++    if mine:
++        try:
++            ws_from_cookie(request, x_forwarded_email)
++            valid = True
++        except HTTPException:
++            valid = False
++    return {"mode": "browser_pat", "has_pat": mine, "valid": valid, "viewer": x_forwarded_email,
++            "schedules": "off", "cookie_max_age_days": MAX_AGE_S // 86400}
++
++
++@router.post("/pat", operation_id="savePat")
++def save_pat(body: PatIn, response: Response, x_forwarded_email: Annotated[str | None, Header()] = None) -> dict:
++    if not enabled():
++        raise HTTPException(status_code=400, detail="This app does not use browser-held tokens.")
++    pat = body.pat.strip()
++    if not pat:
++        raise HTTPException(status_code=400, detail="Paste a personal access token.")
++    try:
++        owner = _pat_user(pat)
++    except (Unauthenticated, PermissionDenied):
++        raise HTTPException(status_code=400, detail="Databricks rejected that token: it is mistyped, expired or revoked.")
++    except Exception as e:  # network / host problems: say so, never echo the token
++        logger.warning("PAT check failed: %s", type(e).__name__)
++        raise HTTPException(status_code=502, detail="Could not reach the workspace to check the token. Try again.")
++    if x_forwarded_email and owner != x_forwarded_email.lower():
++        raise HTTPException(status_code=403,
++                            detail=f"That token belongs to {owner}, but you are signed in as {x_forwarded_email}. "
++                                   "Use a token you created yourself (Settings > Developer > Access tokens).")
++    _checked[hashlib.sha256(pat.encode()).hexdigest()] = time.time()
++    response.headers["Set-Cookie"] = _cookie_header(seal(pat, owner), MAX_AGE_S)
++    logger.info("Browser PAT saved for %s", owner)
++    return {"ok": True, "user": owner, "cookie_max_age_days": MAX_AGE_S // 86400}
++
++
++@router.delete("/pat", operation_id="forgetPat")
++def forget_pat(response: Response) -> dict:
++    response.headers["Set-Cookie"] = CLEAR_COOKIE
++    return {"ok": True}
+diff --git a/app/src/databricks_labs_dqx_app/backend/dependencies.py b/app/src/databricks_labs_dqx_app/backend/dependencies.py
+index 8757aeed..3b25e51e 100644
+--- a/app/src/databricks_labs_dqx_app/backend/dependencies.py
++++ b/app/src/databricks_labs_dqx_app/backend/dependencies.py
+@@ -11,8 +11,9 @@ if TYPE_CHECKING:
+ 
+ from databricks.labs.dqx.checks_validator import ChecksValidationStatus
+ from databricks.sdk import WorkspaceClient
+-from fastapi import Depends, Header, HTTPException, status
++from fastapi import Depends, Header, HTTPException, Request, status
+ 
++from . import browser_pat
+ from .cache import app_cache
+ from .common.authentication.sql import SQLAuthentication
+ from .common.authorization import UserRole, get_user_email
+@@ -140,12 +141,25 @@ def _get_warehouse_id() -> str:
+ # ---------------------------------------------------------------------------
+ 
+ 
++async def get_job_ws(
++    request: Request,
++    x_forwarded_email: Annotated[str | None, Header()] = None,
++) -> WorkspaceClient:
++    """Identity for the Jobs API. Air-gap build: with DQX_BROWSER_PAT=1 it is the viewer's own PAT from their
++    sealed HttpOnly cookie (see browser_pat.py); otherwise the app's service principal, as upstream."""
++    if browser_pat.enabled():
++        return browser_pat.ws_from_cookie(request, x_forwarded_email)
++    return await get_sp_ws()
++
++
+ async def get_sp_sql_executor(
+-    sp_ws: Annotated[WorkspaceClient, Depends(get_sp_ws)],
++    x_forwarded_access_token: Annotated[str | None, Header(alias="X-Forwarded-Access-Token")] = None,
+ ) -> SqlExecutor:
+-    """SqlExecutor using the app's service-principal credentials (main schema)."""
++    """SqlExecutor for Studio's own tables (main schema): the app's service principal, or with
++    DQX_BROWSER_PAT=1 the viewer's on-behalf-of token (sql scope)."""
++    ws = await get_obo_ws(x_forwarded_access_token) if browser_pat.enabled() else await get_sp_ws()
+     return SqlExecutor(
+-        ws=sp_ws,
++        ws=ws,
+         warehouse_id=_get_warehouse_id(),
+         catalog=conf.catalog,
+         schema=conf.schema_name,
+@@ -317,7 +331,7 @@ def get_check_validator() -> Callable[[list[Any]], ChecksValidationStatus]:
+ 
+ 
+ async def get_job_service(
+-    sp_ws: Annotated[WorkspaceClient, Depends(get_sp_ws)],
++    sp_ws: Annotated[WorkspaceClient, Depends(get_job_ws)],
+     sql: Annotated[SqlExecutor, Depends(get_sp_sql_executor)],
+ ) -> JobService:
+     """Create a JobService using app (SP) credentials.
+diff --git a/app/src/databricks_labs_dqx_app/backend/routes/v1/__init__.py b/app/src/databricks_labs_dqx_app/backend/routes/v1/__init__.py
+index 269862ef..7913a8bb 100644
+--- a/app/src/databricks_labs_dqx_app/backend/routes/v1/__init__.py
++++ b/app/src/databricks_labs_dqx_app/backend/routes/v1/__init__.py
+@@ -1,6 +1,8 @@
+ from fastapi import APIRouter
+ 
+ from .me import router as me_router
++from ...browser_pat import router as browser_pat_router
++from ...access_check import router as access_check_router
+ from .check_functions import router as check_functions_router
+ from .config import router as config_router
+ from .contract import router as contract_router
+@@ -20,6 +22,8 @@ from .schedules import router as schedules_router
+ 
+ v1_router = APIRouter()
+ v1_router.include_router(me_router, tags=["meta"])
++v1_router.include_router(browser_pat_router, tags=["pat"])
++v1_router.include_router(access_check_router, tags=["pat"])
+ v1_router.include_router(config_router, prefix="/config", tags=["config"])
+ v1_router.include_router(schedules_router, prefix="/schedules", tags=["schedules"])
+ v1_router.include_router(roles_router, prefix="/roles", tags=["roles"])
+diff --git a/app/src/databricks_labs_dqx_app/backend/routes/v1/roles.py b/app/src/databricks_labs_dqx_app/backend/routes/v1/roles.py
+index 1cea443a..8b65057e 100644
+--- a/app/src/databricks_labs_dqx_app/backend/routes/v1/roles.py
++++ b/app/src/databricks_labs_dqx_app/backend/routes/v1/roles.py
+@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
+ from databricks_labs_dqx_app.backend.common.authorization import UserRole
+ from databricks_labs_dqx_app.backend.dependencies import (
+     get_obo_ws,
+-    get_sp_ws,
++    get_job_ws,
+     get_role_service,
+     require_role,
+ )
+@@ -151,7 +151,7 @@ def list_role_mapping_history(
+ 
+ @router.get("/groups", response_model=list[GroupOut], operation_id="listWorkspaceGroups")
+ def list_workspace_groups(
+-    sp_ws: Annotated[WorkspaceClient, Depends(get_sp_ws)],
++    sp_ws: Annotated[WorkspaceClient, Depends(get_job_ws)],
+     search: Annotated[
+         str | None,
+         Query(
+diff --git a/app/src/databricks_labs_dqx_app/backend/routes/v1/schedules.py b/app/src/databricks_labs_dqx_app/backend/routes/v1/schedules.py
+index 6b65d29a..26ae140b 100644
+--- a/app/src/databricks_labs_dqx_app/backend/routes/v1/schedules.py
++++ b/app/src/databricks_labs_dqx_app/backend/routes/v1/schedules.py
+@@ -106,6 +106,14 @@ def save_schedule(
+     svc: Annotated[ScheduleConfigService, Depends(get_schedule_config_service)],
+ ) -> ScheduleConfigOut:
+     """Create or update a schedule configuration."""
++    from databricks_labs_dqx_app.backend import browser_pat
++
++    if browser_pat.enabled():  # air-gap build: no stored credential, so nothing could fire the schedule
++        raise HTTPException(
++            status_code=409,
++            detail="Scheduler is disabled in dynamic PAT mode: each user's token is kept only in their own browser, "
++            "so the app has no credential to start a run when nobody is using it. Use Run Rules to run on demand.",
++        )
+     try:
+         user = obo_ws.current_user.me()
+         user_email = user.user_name or "unknown"
+-- 
+2.54.0 (Apple Git-157)
+
