@@ -1,7 +1,7 @@
 # DQX Studio for air-gapped workspaces: child and PAT edition
 
 **This branch (`child-pat`) is the child and PAT edition.** It differs from the `main` build in three ways:
-- it installs **standalone or as a child app of an App Catalog**;
+- it installs **standalone or as a child app of an App-ception app**;
 - **each user enters their own personal access token (PAT)** in the app, kept only in their own browser, and no
   token is stored anywhere shared;
 - the app **tells each user what access they are missing**, with the exact fix.
@@ -14,6 +14,10 @@ schemas or volumes, and no grants to an app's service principal. **Not an offici
 plus 9 patches, see [PATCHES.md](PATCHES.md).
 
 ## Install (browser only)
+
+> **Prototype edition.** This is a modified version of DQX Studio built for prototypes: it asks each user for their own
+> personal access token (PAT). The normal DQX Studio (the `main` branch of this repo, and stock DQX Studio) does not
+> need one.
 
 ### What to download (7 files)
 1. **This branch as a ZIP**: https://github.com/The-Real-Jeremy/dqx-studio-airgap/archive/refs/heads/child-pat.zip
@@ -31,7 +35,7 @@ name:
 <your folder>/
   dqx-studio-airgap-child-pat/      ← the branch ZIP (has DEPLOY)
   dqx-studio-wheels-1-of-6/  …  dqx-studio-wheels-6-of-6/
-  app-catalog-main/                 ← only for option B, imported from the App Catalog's own ZIP
+  app-ception-main/                 ← only for option B, imported from App-ception's own ZIP
 ```
 
 ### Before you run DEPLOY: what the workspace must give you
@@ -40,7 +44,7 @@ name:
 | An existing **classic all-purpose cluster**, DBR **15.4 LTS** or **16.4 LTS**, x86_64 | DEPLOY runs on it, and so do Studio's jobs |
 | An existing **catalog and schema** where you can create tables | Studio's 16 `dq_*` tables go here. It never creates a schema |
 | An existing **SQL warehouse** you can use | |
-| Permission to **create an app** (option A) or an **App Catalog** you deployed (option B) | |
+| Permission to **create an app** (option A), or an **App-ception** app you deployed (option B) | |
 | Every Studio user: their own **PAT** | They enter it in the app the first time (step 3) |
 
 ### A) Standalone: Studio as its own app
@@ -56,25 +60,25 @@ DEPLOY prints the policy ids it can see, and uses the only one automatically. Ot
 and Run all again. Or create the app in the UI first (**Compute → Apps → Create app → Custom**, the same name,
 pick the policy) and Run all again: DEPLOY then only deploys.
 
-### B) Child: Studio inside an App Catalog
-1. Deploy the App Catalog first, from its own repo (`app-catalog-main/DEPLOY`, see its README).
+### B) Child: Studio inside an App-ception app
+1. Deploy App-ception first, from its own repo ([github.com/The-Real-Jeremy/app-ception](https://github.com/The-Real-Jeremy/app-ception): import `app-ception-main.zip`, run `app-ception-main/DEPLOY`, see its README).
 2. Open `dqx-studio-airgap-child-pat/DEPLOY`, attach it to the classic cluster, set widget **1** to `child`.
-   Widgets **2** (the catalog folder) and **3** (the catalog app name, default `app-catalog`) are filled in when
-   `app-catalog-main/` sits next to this folder. Set **6**, **7** and **8** as in A, then **Run all**.
-3. It copies Studio into `app-catalog-main/child_apps/dqx_studio/`, adds Studio's scopes to the catalog app, and
-   redeploys the catalog. Open the catalog and click the **DQX Studio** card, then enter your PAT as in A.
+   Widgets **2** (the App-ception folder) and **3** (the App-ception app name, default `app-ception`; an existing `app-catalog` app from before the rename is used if there is no `app-ception`) are filled in when
+   `app-ception-main/` sits next to this folder. Set **6**, **7** and **8** as in A, then **Run all**.
+3. It copies Studio into `app-ception-main/child_apps/dqx_studio/`, adds Studio's scopes to the App-ception app, and
+   redeploys it. Open App-ception and click the **DQX Studio** card, then enter your PAT as in A.
 
 ### Updating to a newer version
 Import onto an existing folder is refused ("already exists"). So first **rename or delete the old
 `dqx-studio-airgap-child-pat/` and `dqx-studio-wheels-*` folders**. Then import the new ZIPs and run DEPLOY again in
-the same mode. In option B, DEPLOY keeps the previous child copy as `app-catalog-main/.bak-child-dqx_studio-<time>`.
-If you also update the App Catalog, run Studio's DEPLOY (mode `child`) again afterwards, because the new catalog
+the same mode. In option B, DEPLOY keeps the previous child copy as `app-ception-main/.bak-child-dqx_studio-<time>`.
+If you also update App-ception, run Studio's DEPLOY (mode `child`) again afterwards, because the new App-ception
 folder does not contain the old copy.
 
 ## What DEPLOY sets up, and who needs what
 
 - **Studio's tables:** 16 `dq_*` Delta tables in your schema, created by you.
-- **The task-runner job:** `<app>-task-runner` (standalone) or `<catalog app>-dqx-studio-task-runner` (child), on the
+- **The task-runner job:** `<app>-task-runner` (standalone) or `<App-ception app>-dqx-studio-task-runner` (child), on the
   cluster DEPLOY ran on. It runs as you (the job owner).
 - **Widget 10** (`grant_job_run_to_users`, default **yes**): gives the workspace group **`users`** (every workspace
   user) **CAN MANAGE RUN** on that job, so anyone can start Studio's runs. It changes nothing else.
@@ -122,7 +126,7 @@ folder does not contain the old copy.
 | App: a run stays at "running" for minutes | The cluster was terminated and the job is starting it (about 6 to 8 minutes) |
 
 ## Remove it
-1. Compute → Apps → the app → **Stop**, **Delete** (option A). In option B, delete `app-catalog-main/child_apps/dqx_studio/` and run the catalog's DEPLOY.
+1. Compute → Apps → the app → **Stop**, **Delete** (option A). In option B, delete `app-ception-main/child_apps/dqx_studio/` and run App-ception's DEPLOY.
 2. Jobs & Pipelines → the task-runner job → **Delete**.
 3. Drop the 16 `dq_*` tables in your schema.
 4. Delete the install folder (`/Workspace/Users/<you>/dqx_studio_install` and `.previous`), the imported folders, and revoke your PAT.

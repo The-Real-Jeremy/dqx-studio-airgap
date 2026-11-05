@@ -71,6 +71,10 @@
         }).catch(function () { save.disabled = false; msg.style.color = "#b91c1c"; msg.textContent = "Could not reach the app. Check your connection and try again."; });
       },
     }, [
+      el("div", { role: "note", "data-testid": "prototype-banner", style: "margin:-6px 0 16px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-size:13px;line-height:1.45;" }, [
+        el("strong", { text: "Prototype edition. " }),
+        el("span", { text: "This is a modified version of DQX Studio built for prototypes, and it asks for your personal access token. The normal DQX Studio does not need one." }),
+      ]),
       el("h2", { text: "Enter your Databricks personal access token", style: "margin:0 0 10px;font-size:20px;" }),
       reason ? el("p", { text: reason, style: "margin:0 0 12px;padding:10px 12px;background:#fef2f2;border-radius:8px;color:#991b1b;font-size:14px;" }) : null,
       el("p", { style: "margin:0 0 12px;font-size:14px;line-height:1.5;color:#334155;", text:

@@ -3,8 +3,8 @@
 # MAGIC # Deploy DQX Studio (child and PAT edition, browser only)
 # MAGIC
 # MAGIC Two ways, chosen with the **mode** widget:
-# MAGIC - **child**: add Studio to an App Catalog you deployed from `app-catalog-main/`. It copies this folder into
-# MAGIC   the catalog's `child_apps/dqx_studio/`, adds the scopes Studio needs to the catalog app, and redeploys it.
+# MAGIC - **child**: add Studio to an App-ception app you deployed from `app-ception-main/`. It copies this folder into
+# MAGIC   its `child_apps/dqx_studio/`, adds the scopes Studio needs to the App-ception app, and redeploys it.
 # MAGIC - **standalone**: deploy Studio as its own Databricks App.
 # MAGIC
 # MAGIC **Run it on the existing classic all-purpose cluster** (DBR 15.4 LTS or 16.4 LTS): the task-runner job uses
@@ -24,13 +24,16 @@ import os, re, json, time
 ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
 SRC = "/Workspace" + os.path.dirname(ctx.notebookPath().get())   # this repo folder, whatever its name
 PARENT = os.path.dirname(SRC)
-_cands = [d for d in sorted(os.listdir(PARENT)) if d.startswith("app-catalog") and os.path.isfile(os.path.join(PARENT, d, "catalog", "server.mjs"))]
-guess = os.path.join(PARENT, "app-catalog-main") if "app-catalog-main" in _cands else (os.path.join(PARENT, _cands[0]) if _cands else "")
+# The App-ception folder: app-ception-main, then app-catalog-main (its old name), then the first sibling folder that
+# has catalog/server.mjs. A renamed-aside old copy only wins if nothing better is there.
+_cands = [d for d in sorted(os.listdir(PARENT)) if os.path.isfile(os.path.join(PARENT, d, "catalog", "server.mjs"))]
+guess = next((os.path.join(PARENT, d) for d in ("app-ception-main", "app-catalog-main") if d in _cands),
+             os.path.join(PARENT, _cands[0]) if _cands else "")
 me = json.loads(ctx.safeToJson())["attributes"]["user"]
 
 dbutils.widgets.dropdown("mode", "child", ["child", "standalone"], "1. Mode")
-dbutils.widgets.text("catalog_folder", guess, "2. (child) App Catalog folder")
-dbutils.widgets.text("catalog_app_name", "app-catalog", "3. (child) App Catalog app name")
+dbutils.widgets.text("catalog_folder", guess, "2. (child) App-ception folder")
+dbutils.widgets.text("catalog_app_name", "app-ception", "3. (child) App-ception app name")
 dbutils.widgets.text("standalone_app_name", "dqx-studio", "4. (standalone) App name")
 dbutils.widgets.text("budget_policy_id", "", "5. (standalone) Budget policy id, if required")
 dbutils.widgets.text("catalog", "", "6. Catalog (existing)")
@@ -374,9 +377,12 @@ def write_app_folder(dest):
 if W["mode"] == "child":
     CAT = W["catalog_folder"].rstrip("/")
     assert CAT and os.path.isfile(f"{CAT}/catalog/server.mjs"), \
-        f"widget 2 must be the App Catalog folder (with catalog/server.mjs); got {CAT!r}. Import app-catalog-main.zip first."
+        f"widget 2 must be the App-ception folder (with catalog/server.mjs); got {CAT!r}. Import app-ception-main.zip first."
     a = get_app(APP_NAME)
-    assert a is not None, f"no app {APP_NAME!r}: deploy the App Catalog first (its DEPLOY notebook), or fix widget 3"
+    if a is None and APP_NAME == "app-ception" and get_app("app-catalog") is not None:
+        APP_NAME, a = "app-catalog", get_app("app-catalog")   # deployed before the rename
+        print("no app 'app-ception'; using the existing 'app-catalog' app")
+    assert a is not None, f"no app {APP_NAME!r}: deploy App-ception first (its DEPLOY notebook), or fix widget 3"
     dest = f"{CAT}/child_apps/dqx_studio"
     if os.path.exists(dest):   # keep the previous copy OUTSIDE child_apps, so it is not discovered as an app
         bak = f"{CAT}/.bak-child-dqx_studio-{time.strftime('%Y%m%d-%H%M%S')}"

@@ -1,4 +1,4 @@
-From 6b04f43f455149a02a7fd53871230504462a769e Mon Sep 17 00:00:00 2001
+From d12971c83e02021f1420947c9ef4ca28156e195d Mon Sep 17 00:00:00 2001
 From: dqx-studio-airgap build <build@localhost>
 Date: Thu, 5 Nov 2026 20:06:07 +1100
 Subject: [PATCH 9/9] Air-gap build: PAT entry screen, Forget token, access panel;
@@ -6,9 +6,9 @@ Subject: [PATCH 9/9] Air-gap build: PAT entry screen, Forget token, access panel
 
 ---
  app/src/databricks_labs_dqx_app/ui/index.html |   2 +
- .../ui/public/pat-gate.js                     | 179 ++++++++++++++++++
+ .../ui/public/pat-gate.js                     | 183 ++++++++++++++++++
  .../ui/routes/_sidebar/runs.tsx               |  23 +++
- 3 files changed, 204 insertions(+)
+ 3 files changed, 208 insertions(+)
  create mode 100644 app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
 
 diff --git a/app/src/databricks_labs_dqx_app/ui/index.html b/app/src/databricks_labs_dqx_app/ui/index.html
@@ -26,10 +26,10 @@ index 0f56d897..fe02fc7f 100644
  </html>
 diff --git a/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js b/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
 new file mode 100644
-index 00000000..27cb836f
+index 00000000..589deaa2
 --- /dev/null
 +++ b/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,183 @@
 +/*
 + * Air-gap build: browser-held personal access token (PAT) and per-user access check.
 + *
@@ -103,6 +103,10 @@ index 00000000..27cb836f
 +        }).catch(function () { save.disabled = false; msg.style.color = "#b91c1c"; msg.textContent = "Could not reach the app. Check your connection and try again."; });
 +      },
 +    }, [
++      el("div", { role: "note", "data-testid": "prototype-banner", style: "margin:-6px 0 16px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fdba74;color:#7c2d12;font-size:13px;line-height:1.45;" }, [
++        el("strong", { text: "Prototype edition. " }),
++        el("span", { text: "This is a modified version of DQX Studio built for prototypes, and it asks for your personal access token. The normal DQX Studio does not need one." }),
++      ]),
 +      el("h2", { text: "Enter your Databricks personal access token", style: "margin:0 0 10px;font-size:20px;" }),
 +      reason ? el("p", { text: reason, style: "margin:0 0 12px;padding:10px 12px;background:#fef2f2;border-radius:8px;color:#991b1b;font-size:14px;" }) : null,
 +      el("p", { style: "margin:0 0 12px;font-size:14px;line-height:1.5;color:#334155;", text:

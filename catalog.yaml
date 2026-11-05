@@ -1,4 +1,4 @@
-# Card metadata for running this app as a child of the App Catalog (ignored when deployed standalone).
+# Card metadata for running this app as a child of App-ception (ignored when deployed standalone).
 title: DQX Studio
 description: No-code data-quality rules with Databricks Labs DQX. Author, approve and run checks on the existing classic cluster; each user runs as themselves with their own token, kept only in their browser.
 app_dir: app
