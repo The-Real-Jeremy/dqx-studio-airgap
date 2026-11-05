@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Rebuild ../bundle/: DQX Studio (from the DQX v0.16.0 release, plus patches/) packaged so an
-# air-gapped workspace can install it from a notebook. Run on a machine WITH internet/proxy access.
+# Rebuild the child-pat edition: DQX Studio (DQX v0.16.0 + patches/) as ../app/ (code + prebuilt UI) and the wheel
+# packs (dist/dqx-studio-wheels-<k>-of-<n>.zip + ../wheels.json). Run on a machine WITH internet/proxy access.
 #
-#   build/build_bundle.sh        # output: replaces ../bundle/ (and writes ../SHA256SUMS.txt)
+#   build/build_bundle.sh        # output: replaces ../app/src, ../app/requirements.txt, ../wheels.json; packs in ../dist
 #
 # Needs: git, node + yarn (1.x), uv, python3.11. Env overrides:
 #   DQX_REF=v0.16.0  DQX_REPO=https://github.com/databrickslabs/dqx.git  DQX_SRC=<existing clone>
@@ -14,7 +14,7 @@ DQX_REF="${DQX_REF:-v0.16.0}"
 DQX_REPO="${DQX_REPO:-https://github.com/databrickslabs/dqx.git}"
 WORK="${WORK:-$HERE/.build}"
 OUT="$(cd "$HERE/.." && pwd)"
-B="$WORK/dqx_studio_bundle"          # bundle root (becomes the zip's top folder)
+B="$WORK/stage"                      # staging: app/, app_wheels/, cluster_wheels/
 PLATFORMS=(--platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64
            --platform manylinux_2_5_x86_64 --platform manylinux1_x86_64 --platform any)
 
@@ -50,8 +50,8 @@ for f in backend/sql_executor.py backend/services/ai_rules_service.py backend/pg
 done
 
 step "4/7 App wheelhouse: linux x86_64, CPython 3.11 (the Apps runtime's Python)"
-WH="$B/app/wheels"; mkdir -p "$WH" "$WORK/sdist"
-grep -v '^thrift==' "$HERE/deps/app-requirements.lock.txt" > "$WORK/app-req.nothrift.txt"
+WH="$B/app_wheels"; mkdir -p "$WH" "$WORK/sdist"
+grep -vE '^(thrift|pandas|pyarrow|numpy)==' "$HERE/deps/app-requirements.lock.txt" > "$WORK/app-req.nothrift.txt"
 python3.11 -m pip download -q --no-deps --only-binary=:all: --implementation cp --python-version 3.11 \
   "${PLATFORMS[@]}" -r "$WORK/app-req.nothrift.txt" -d "$WH"
 # thrift 0.20.0 (databricks-sql-connector) is published as an sdist only: build a pure-Python wheel.
@@ -59,44 +59,50 @@ python3.11 -m pip download -q --no-deps --no-binary=:all: thrift==0.20.0 -d "$WO
 tar -xzf "$WORK/sdist/thrift-0.20.0.tar.gz" -C "$WORK/sdist"
 sed -i.bak 's/^    with_binary = True$/    with_binary = False/' "$WORK/sdist/thrift-0.20.0/setup.py"
 python3.11 -m pip wheel -q --no-deps "$WORK/sdist/thrift-0.20.0" -w "$WH"
-{ printf -- '--no-index\n--find-links ./wheels\n'; cat "$HERE/deps/app-requirements.lock.txt"; } > "$B/app/requirements.txt"
+# pandas / pyarrow / numpy come from the Databricks Apps runtime (pre-installed), so they are ranges, not vendored.
+{ printf -- '--no-index\n--find-links ./wheels\n'; sed -E \
+    -e 's/^pandas==.*/pandas>=2.2,<2.4  # from the Databricks Apps runtime (pre-installed); not vendored/' \
+    -e 's/^pyarrow==.*/pyarrow>=16,<25  # from the Databricks Apps runtime (pre-installed); not vendored/' \
+    -e 's/^numpy==.*/numpy>=1.26,<2  # from the Databricks Apps runtime (pre-installed); not vendored/' \
+    "$HERE/deps/app-requirements.lock.txt"; } > "$B/app/requirements.txt"
 # Prove the wheelhouse is complete: resolve every pin OFFLINE for the Apps runtime (linux x86_64, CPython 3.11).
-python3.11 -m pip install -q --dry-run --ignore-installed --no-index --find-links "$WH" --only-binary=:all: \
-  --implementation cp --python-version 3.11 "${PLATFORMS[@]}" --target "$WORK/dry_app" -r "$HERE/deps/app-requirements.lock.txt"
+# pandas / pyarrow / numpy stand in for the runtime's pre-installed copies: downloaded for this check only, never shipped.
+STANDIN="$WORK/preinstalled_standin"; mkdir -p "$STANDIN"
+python3.11 -m pip download -q --no-deps --only-binary=:all: --implementation cp --python-version 3.11 "${PLATFORMS[@]}" \
+  pandas==2.2.3 pyarrow==16.1.0 numpy==1.26.4 -d "$STANDIN"
+python3.11 -m pip install -q --dry-run --ignore-installed --no-index --find-links "$WH" --find-links "$STANDIN" --only-binary=:all: \
+  --implementation cp --python-version 3.11 "${PLATFORMS[@]}" --target "$WORK/dry_app" -r "$B/app/requirements.txt"
 echo "app wheelhouse resolves offline: $(ls "$WH" | wc -l | tr -d ' ') wheels"
 
-step "5/7 Cluster wheelhouse: CPython 3.11 (DBR 15.4 LTS) and 3.12 (DBR 16.4 LTS), x86_64 AND aarch64, + the task-runner wheel"
+step "5/7 Cluster wheelhouse: CPython 3.11 (DBR 15.4 LTS) and 3.12 (DBR 16.4 LTS), x86_64, + the task-runner wheel"
 CW="$B/cluster_wheels"; mkdir -p "$CW"
-ARM=(--platform manylinux_2_28_aarch64 --platform manylinux_2_17_aarch64 --platform manylinux2014_aarch64 --platform any)
 for PY in 3.11 3.12; do
   python3.11 -m pip download -q --no-deps --only-binary=:all: --implementation cp --python-version "$PY" \
     "${PLATFORMS[@]}" -r "$HERE/deps/cluster-requirements.lock.txt" -d "$CW"
-  python3.11 -m pip download -q --no-deps --only-binary=:all: --implementation cp --python-version "$PY" \
-    "${ARM[@]}" -r "$HERE/deps/cluster-requirements.lock.txt" -d "$CW"
 done
 ( cd "$APP" && uv build tasks/ --wheel --out-dir "$CW" >/dev/null ) && rm -f "$CW/.gitignore"
-# Resolve exactly what the runner job installs, offline, for each Python and architecture.
 RUNNER_PKGS=(databricks-labs-dqx==0.16.0 databricks-sdk==0.120.0 databricks-labs-dqx-task-runner==0.1.0)
 for PY in 3.11 3.12; do
   python3.11 -m pip install -q --dry-run --ignore-installed --no-index --find-links "$CW" --only-binary=:all: \
     --implementation cp --python-version "$PY" "${PLATFORMS[@]}" --target "$WORK/dry_x86_$PY" "${RUNNER_PKGS[@]}"
-  python3.11 -m pip install -q --dry-run --ignore-installed --no-index --find-links "$CW" --only-binary=:all: \
-    --implementation cp --python-version "$PY" "${ARM[@]}" --target "$WORK/dry_arm_$PY" "${RUNNER_PKGS[@]}"
 done
-echo "cluster wheelhouse resolves offline for Python 3.11 and 3.12, x86_64 and aarch64: $(ls "$CW" | wc -l | tr -d ' ') wheels"
+echo "cluster wheelhouse resolves offline for Python 3.11 and 3.12 (x86_64): $(ls "$CW" | wc -l | tr -d ' ') wheels"
 
-step "6/7 Runner notebook, manifest"
-# Notebook sources travel as .py.txt: a .py file that starts with "# Databricks notebook source" turns into a
-# notebook when the setup notebook copies the bundle into /Workspace, and the copy then fails on it.
-mkdir -p "$B/runner_job" && cp "$HERE/runner_job/dqx_task_runner_job.py" "$B/runner_job/dqx_task_runner_job.py.txt"
-FILES=$(( $(find "$B" -type f | wc -l) + 1 ))   # + MANIFEST.json itself
-cat > "$B/MANIFEST.json" <<EOF
-{"bundle_version": "0.15.0+airgap.1", "dqx_ref": "$DQX_REF",
- "dqx_base_commit": "$(git -C "$WORK/dqx" rev-parse "$DQX_REF^{commit}")", "patches": $(ls "$HERE"/patches/*.patch | wc -l | tr -d ' '), "built_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
- "file_count": $FILES, "app_wheels": $(ls "$WH" | wc -l | tr -d ' '), "cluster_wheels": $(ls "$CW" | wc -l | tr -d ' ')}
-EOF
+step "6/7 Replace ../app (code, prebuilt UI, requirements.txt) and the runner notebook"
+# MODIFIED / ADDED headers (Databricks License: prominent notice on modified files)
+for f in sql_executor.py services/ai_rules_service.py pg_executor.py sql_utils.py app.py dependencies.py \
+         routes/v1/__init__.py routes/v1/roles.py routes/v1/schedules.py; do
+  t="$B/app/src/databricks_labs_dqx_app/backend/$f"
+  head -1 "$t" | grep -q '^# MODIFIED' || { echo "# MODIFIED: changed from databrickslabs/dqx v0.16.0 for an air-gapped, permission-limited install. See PATCHES.md."; cat "$t"; } > "$t.new" && mv "$t.new" "$t"
+done
+for f in browser_pat.py access_check.py; do
+  t="$B/app/src/databricks_labs_dqx_app/backend/$f"
+  { echo "# ADDED by the dqx-studio-airgap build (not part of upstream DQX). See PATCHES.md."; cat "$t"; } > "$t.new" && mv "$t.new" "$t"
+done
+rm -rf "$OUT/app/src" && mkdir -p "$OUT/app" && cp -R "$B/app/src" "$OUT/app/src" && cp "$B/app/requirements.txt" "$OUT/app/requirements.txt"
+# Notebook sources travel as .py.txt: a .py starting "# Databricks notebook source" turns into a notebook on copy.
+mkdir -p "$OUT/runner_job" && cp "$HERE/runner_job/dqx_task_runner_job.py" "$OUT/runner_job/dqx_task_runner_job.py.txt"
 
-step "7/7 Replace ../bundle and write checksums"
-rm -rf "$OUT/bundle" && cp -R "$B" "$OUT/bundle"
-( cd "$OUT" && find bundle setup_notebook.py -type f -print0 | sort -z | xargs -0 shasum -a 256 > SHA256SUMS.txt )
-echo "bundle: $(find "$OUT/bundle" -type f | wc -l | tr -d ' ') files"
+step "7/7 Wheel packs (each under 10 MiB) + ../wheels.json"
+rm -rf "$OUT/dist" && python3 "$HERE/make_packs.py" "$WH" "$CW" --out "$OUT/dist"
+ls -l "$OUT/dist"

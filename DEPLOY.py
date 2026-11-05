@@ -74,10 +74,10 @@ for f in man["files"]:
     p = os.path.join(packs[f["pack"]], f["target"], f["name"])
     if not os.path.isfile(p) or os.path.getsize(p) != f["size"] or hashlib.sha256(open(p, "rb").read()).hexdigest() != f["sha256"]:
         bad.append(f["name"])
-    WHEEL[f["name"]] = (f["target"], p)
+    WHEEL[(f["target"], f["name"])] = p
 assert not bad, f"{len(bad)} wheel(s) missing or corrupt, re-import their pack: {bad[:5]}"
 print(f"{len(man['files'])} wheels in {N} packs verified (sha256): "
-      f"{sum(t == 'app' for t, _ in WHEEL.values())} app, {sum(t == 'cluster' for t, _ in WHEEL.values())} cluster")
+      f"{sum(t == 'app' for t, _ in WHEEL)} app, {sum(t == 'cluster' for t, _ in WHEEL)} cluster")
 
 # COMMAND ----------
 
@@ -110,12 +110,12 @@ INST = W["install_folder"].rstrip("/")
 assert INST.startswith("/Workspace/"), "install_folder must be a /Workspace/... path"
 replace_folder(INST)
 os.makedirs(f"{INST}/cluster_wheels")
-for n, (t, p) in WHEEL.items():
+for (t, n), p in WHEEL.items():
     if t == "cluster":
         shutil.copyfile(p, f"{INST}/cluster_wheels/{n}")
 shutil.copytree(f"{SRC}/runner_job", f"{INST}/runner_job")
 n_cw = len(os.listdir(f"{INST}/cluster_wheels"))
-assert n_cw == sum(t == "cluster" for t, _ in WHEEL.values()), f"copied {n_cw} cluster wheels"
+assert n_cw == sum(t == "cluster" for t, _ in WHEEL), f"copied {n_cw} cluster wheels"
 print(f"install folder {INST}: {n_cw} cluster wheels + runner notebook")
 subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "--disable-pip-version-check", "--no-index",
                        "--find-links", f"{INST}/cluster_wheels", "databricks-sdk==0.120.0", "databricks-labs-dqx==0.16.0"])

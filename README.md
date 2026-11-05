@@ -1,190 +1,140 @@
-# DQX Studio for air-gapped workspaces
+# DQX Studio for air-gapped workspaces: child and PAT edition
 
-An installable build of **DQX Studio**, the no-code data-quality app from [Databricks Labs DQX](https://github.com/databrickslabs/dqx)
-(v0.16.0), for a Databricks workspace that has:
+**This branch (`child-pat`) is the child and PAT edition.** It differs from the `main` build in three ways:
+- it installs **standalone or as a child app of an App Catalog**;
+- **each user enters their own personal access token (PAT)** in the app, kept only in their own browser, and no
+  token is stored anywhere shared;
+- the app **tells each user what access they are missing**, with the exact fix.
 
-- no internet (no PyPI, npm or GitHub) at install or run time, and no Databricks CLI;
-- no Lakebase, no serverless jobs and no serverless all-purpose compute;
-- no permission to create catalogs, schemas or volumes, or to grant anything to an app's service principal;
-- no Foundation Model APIs (the AI features are switched off).
+The `main` branch is the earlier single-token build and is unchanged.
 
-Everything installs from **one setup notebook** on an existing classic cluster. Studio then runs every Spark step as
-a job on that cluster and keeps all its state in Delta tables in **one existing schema**.
+DQX Studio is the no-code data-quality app from [Databricks Labs DQX](https://github.com/databrickslabs/dqx) (v0.16.0).
+This build needs no internet (no PyPI, npm or GitHub), no CLI, no Lakebase, no serverless compute, no new catalogs,
+schemas or volumes, and no grants to an app's service principal. **Not an official Databricks product**: DQX Studio
+plus 9 patches, see [PATCHES.md](PATCHES.md).
 
-**This is not an official Databricks product.** It is DQX Studio with 6 small patches (see [PATCHES.md](PATCHES.md)),
-built for a proof of concept. The back end runs as **your personal access token (PAT)** in place of the app's service
-principal; read [PAT exposure](#pat-exposure) before using it.
+## Install (browser only)
 
-## What is in this repo
+### What to download (7 files)
+1. **This branch as a ZIP**: https://github.com/The-Real-Jeremy/dqx-studio-airgap/archive/refs/heads/child-pat.zip
+   (`dqx-studio-airgap-child-pat.zip`, under 1 MiB).
+2. **The 6 wheel packs** from the pre-release **child-pat-v1** (Releases on the GitHub page):
+   `dqx-studio-wheels-1-of-6.zip` to `dqx-studio-wheels-6-of-6.zip`, each under 10 MiB. They hold the Python wheels
+   Studio installs offline: 51 for the app, 30 for the cluster.
 
-| Path | What it is | Size |
-|---|---|---|
-| `setup_notebook.py` | The only notebook you run. Installs everything | 15 KB |
-| `bundle/app/` | Studio's back end and prebuilt UI, plus 54 vendored wheels for the Apps runtime (Linux x86_64, CPython 3.11) | 113 MB |
-| `bundle/cluster_wheels/` | DQX 0.16.0, the Databricks SDK and the task-runner wheel for the cluster (CPython 3.11 and 3.12, x86_64 and aarch64) | 42 MB |
-| `bundle/runner_job/` | The notebook the task-runner job runs | 3 KB |
-| `bundle/MANIFEST.json` | Version and file count (the setup checks it) | |
-| `build/` | How `bundle/` was built: `build_bundle.sh`, the patches, the pinned requirements | |
-| `PATCHES.md`, `LICENSES/` | Changes against upstream, and the licences | |
-| `SHA256SUMS.txt` | A checksum for every file in `bundle/` and the setup notebook | |
+### Import them (the same way, 7 times)
+In Databricks: **Workspace** → your home folder → **⋮ → Import** → drop **one** `.zip` → **Import**. Do this for
+the branch ZIP, then for each pack, all into the **same** folder. Databricks unzips each into a folder of its own
+name:
 
-## Before you start: what the workspace must give you
+```
+<your folder>/
+  dqx-studio-airgap-child-pat/      ← the branch ZIP (has DEPLOY)
+  dqx-studio-wheels-1-of-6/  …  dqx-studio-wheels-6-of-6/
+  app-catalog-main/                 ← only for option B, imported from the App Catalog's own ZIP
+```
 
+### Before you run DEPLOY: what the workspace must give you
 | You need | Notes |
 |---|---|
-| An existing **classic all-purpose cluster** on **DBR 15.4 LTS or 16.4 LTS**, x86_64 or Graviton, standard or dedicated access mode | You need CAN ATTACH TO. CAN RESTART lets jobs start it when it is terminated |
-| An existing **schema** where you have USE SCHEMA, CREATE TABLE, SELECT and MODIFY (plus USE CATALOG on its catalog) | Studio creates its 16 tables here. Creating a new schema is not needed |
-| An existing **volume** where you have READ VOLUME and WRITE VOLUME | Only to upload the repo zip. Creating a volume needs CREATE VOLUME, which you may not have; ask the schema owner for one, or use a Git folder (step 3, option B) |
-| An existing **SQL warehouse** you can use (CAN USE) | Studio reads and writes its tables through it |
-| Permission to **create a Databricks App** and a **job** | If the workspace requires a **budget (usage) policy** for apps, you also need permission to use one (see field 12) |
-| Permission to **create a PAT** | Confirmed available in the target workspace. If PATs are disabled for you, this build cannot be used |
+| An existing **classic all-purpose cluster**, DBR **15.4 LTS** or **16.4 LTS**, x86_64 | DEPLOY runs on it, and so do Studio's jobs |
+| An existing **catalog and schema** where you can create tables | Studio's 16 `dq_*` tables go here. It never creates a schema |
+| An existing **SQL warehouse** you can use | |
+| Permission to **create an app** (option A) or an **App Catalog** you deployed (option B) | |
+| Every Studio user: their own **PAT** | They enter it in the app the first time (step 3) |
 
-The cluster wheels cover Python 3.11 (DBR 15.4 LTS) and 3.12 (DBR 16.4 LTS), and keep protobuf below 5 so the runtime's own mlflow-skinny and Google API packages are not broken. Another DBR needs a rebuild with its Python version. The app side does not depend on the cluster.
+### A) Standalone: Studio as its own app
+1. Open `dqx-studio-airgap-child-pat/DEPLOY` and attach it to the classic cluster.
+2. Set the widgets: **1** `standalone`, **4** the app name (e.g. `dqx-studio`), **6** catalog, **7** schema,
+   **8** SQL warehouse id (SQL Warehouses → the warehouse → its URL or *Connection details*). Leave the rest, then **Run all**.
+   It takes about 10 to 15 minutes and prints the **APP URL**.
+3. Open the URL and click **Authorize**. Studio asks for **your own PAT** (your user icon → Settings → Developer →
+   Access tokens → Generate new token). Paste it, then press **Save and continue**.
 
-## Install: step by step
+If DEPLOY stops with **"Unable to use fallback policies"**, your workspace needs a budget policy on new apps.
+DEPLOY prints the policy ids it can see, and uses the only one automatically. Otherwise, paste one into widget **5**
+and Run all again. Or create the app in the UI first (**Compute → Apps → Create app → Custom**, the same name,
+pick the policy) and Run all again: DEPLOY then only deploys.
 
-### 1. Get this repo onto your laptop
+### B) Child: Studio inside an App Catalog
+1. Deploy the App Catalog first, from its own repo (`app-catalog-main/DEPLOY`, see its README).
+2. Open `dqx-studio-airgap-child-pat/DEPLOY`, attach it to the classic cluster, set widget **1** to `child`.
+   Widgets **2** (the catalog folder) and **3** (the catalog app name, default `app-catalog`) are filled in when
+   `app-catalog-main/` sits next to this folder. Set **6**, **7** and **8** as in A, then **Run all**.
+3. It copies Studio into `app-catalog-main/child_apps/dqx_studio/`, adds Studio's scopes to the catalog app, and
+   redeploys the catalog. Open the catalog and click the **DQX Studio** card, then enter your PAT as in A.
 
-Either **Code > Download ZIP** on GitHub (you get `dqx-studio-airgap-main.zip`, about 150 MB), or `git clone` it and then
-zip the folder (on a Mac: right-click the folder > **Compress**). You will upload that single zip.
+### Updating to a newer version
+Import onto an existing folder is refused ("already exists"). So first **rename or delete the old
+`dqx-studio-airgap-child-pat/` and `dqx-studio-wheels-*` folders**. Then import the new ZIPs and run DEPLOY again in
+the same mode. In option B, DEPLOY keeps the previous child copy as `app-catalog-main/.bak-child-dqx_studio-<time>`.
+If you also update the App Catalog, run Studio's DEPLOY (mode `child`) again afterwards, because the new catalog
+folder does not contain the old copy.
 
-### 2. Create a PAT
+## What DEPLOY sets up, and who needs what
 
-In the workspace: your user icon (top right) > **Settings** > **Developer** > **Access tokens** > **Manage** > **Generate new token**.
+- **Studio's tables:** 16 `dq_*` Delta tables in your schema, created by you.
+- **The task-runner job:** `<app>-task-runner` (standalone) or `<catalog app>-dqx-studio-task-runner` (child), on the
+  cluster DEPLOY ran on. It runs as you (the job owner).
+- **Widget 10** (`grant_job_run_to_users`, default **yes**): gives the workspace group **`users`** (every workspace
+  user) **CAN MANAGE RUN** on that job, so anyone can start Studio's runs. It changes nothing else.
+- **Widget 11** (`apply_schema_grants`, default **no**): DEPLOY always **prints** these grants. With `yes` it also
+  applies the ones you are allowed to (you own the `dq_*` tables, so those succeed; the catalog and schema lines need
+  their owner). They cover **Studio's schema only**:
 
-- Comment: `dqx-studio-airgap` (the setup notebook reports the expiry of tokens whose comment starts with `dqx-studio`).
-- Lifetime: the longest your workspace allows. **Write down the expiry date.** When the PAT expires the app stops working until you re-run the setup with a new one (step 9).
-- Copy the token now; it is shown only once.
+  ```sql
+  GRANT USE CATALOG ON CATALOG `<catalog>` TO `account users`;
+  GRANT USE SCHEMA, CREATE TABLE ON SCHEMA `<catalog>`.`<schema>` TO `account users`;
+  GRANT SELECT, MODIFY ON TABLE `<catalog>`.`<schema>`.`dq_<each of the 16>` TO `account users`;
+  ```
 
-### 3. Put the repo in the workspace
+  Why each is needed: users read and write Studio's tables as themselves (SELECT, MODIFY). Every run creates a
+  temporary view in the schema (CREATE TABLE). Users also need CAN USE on the SQL warehouse, and SELECT on the
+  tables they want to check.
 
-**Option A: upload the zip to a volume (the usual way).**
-Catalog Explorer > your catalog > your schema > **Volumes** > the volume > **Upload to this volume** > pick the zip.
-Then import the notebook on its own: **Workspace** > your folder > **⋮** > **Import** > **File** > `setup_notebook.py` (from the zip or the cloned folder).
+## Using it
 
-**Option B: a Git folder**, only if the workspace can reach a Git server that hosts this repo.
-**Workspace** > **Create** > **Git folder** > paste the repo URL. The setup notebook is then already inside the repo folder.
-
-### 4. Open the setup notebook and attach it to the cluster
-
-Open `setup_notebook` and attach it to the existing classic cluster (the cluster selector at the top right).
-
-### 5. Fill the settings
-
-The first cell creates these fields at the top of the notebook. Run that cell once (Shift+Enter) to make them appear, then fill them in:
-
-| # | Field | What to enter | Where to find it |
-|---|---|---|---|
-| 1 | Repo zip or repo folder | Option A: the zip's path, e.g. `/Volumes/<catalog>/<schema>/<volume>/dqx-studio-airgap-main.zip`. Option B: leave blank | Catalog Explorer > the volume > the file > **Copy path** |
-| 2 | Catalog | The existing catalog | Catalog Explorer |
-| 3 | Schema | The existing schema (tables are created here) | Catalog Explorer |
-| 4 | SQL warehouse id | e.g. `1234567890abcdef` | **SQL Warehouses** > the warehouse > **Connection details**, or the id in its URL |
-| 5 | Classic cluster id | Leave blank to use the cluster the notebook is attached to | **Compute** > the cluster > the id in its URL |
-| 6 | App name | Lowercase letters, numbers and hyphens, e.g. `dqx-studio-airgap` | Your choice; must not clash with an existing app |
-| 7 | Workspace install folder | Leave blank for `/Workspace/Users/<you>/dqx_studio_airgap` | |
-| 8 | Studio admin group | A group you are in. `users` makes every user a Studio admin (fine for a POC) | **Settings** > **Identity and access** > **Groups** |
-| 9 | Where the PAT is kept | `secret` (a secret scope, the default) or `app_yaml` (inside the app's config) | See [PAT exposure](#pat-exposure) |
-| 10 | Secret scope | e.g. `dqx_studio_airgap`. Created if it does not exist | |
-| 11 | PAT | Paste the token from step 2. Leave blank on a re-run to keep the stored one | |
-| 12 | Budget policy id | Leave blank unless app creation fails with *Unable to use fallback policies*. Then enter the policy's id, or leave it blank and create the app in the UI first (see Troubleshooting) | Your workspace admin. The setup prints the app's policy id once the app exists |
-
-### 6. Run all
-
-**Run all** (top of the notebook). It takes about 3 minutes. In order, it:
-
-1. copies `bundle/` into the install folder and checks the file count;
-2. installs DQX for the notebook offline;
-3. creates Studio's 16 Delta tables in your schema;
-4. creates the job `<app name>-task-runner` on the existing cluster;
-5. checks that the PAT is yours and stores it;
-6. creates and deploys the app.
-
-The last cells print **OPEN: https://...** (the app URL), and confirm that the app's service principal has no Unity
-Catalog grants.
-
-### 7. Open the app
-
-Open the URL. On the first visit click **Authorize** on the consent screen.
-
-### 8. First-run check (about 5 minutes)
-
-1. **Create Rules** > **Single table rules**. Pick a table you can read, e.g. `samples.bakehouse.sales_transactions` if the
-   `samples` catalog is available.
-2. Add a rule: column `paymentMethod`, check **Allowed values**, values `'visa', 'mastercard'`, criticality **error**.
-   **Quote text values.** DQX 0.16 reads an unquoted word as a column name, and the run then fails with `UNRESOLVED_COLUMN`.
-3. Save, then **Drafts & Review** > **Submit**, then **Approve**.
-4. **Run Rules** > select the table > set **Row scope** to **All rows** (the default, *Sample rows*, checks only the first 1,000 rows) > **Run selected**. With the cluster running this takes about a minute.
-5. **Runs History** > the run. For `samples.bakehouse.sales_transactions` you should see **3,333 rows, 2,227 valid, 1,106 errors**
-   (every `amex` sale fails the rule).
-
-### 9. Later: re-run, rotate the PAT, upgrade
-
-- **Re-run** the notebook any time; it updates in place and keeps the previous install as `<install folder>.previous`.
-- **Rotate the PAT:** create a new one (step 2), paste it into field 11, run all, then revoke the old one.
-
-## How long a run takes
-
-| Cluster state | Time per run |
-|---|---|
-| Running | about 45 to 80 seconds (most of it is the offline `pip install` each run does) |
-| Terminated | about 8 minutes: the job starts the cluster first (about 6 minutes) |
-
-Schedules start the cluster when they fire, so the cluster's auto-termination setting decides most of the cost.
-
-## PAT exposure
-
-- The PAT carries **your whole identity**. Every back-end action runs as you: saving rules, triggering jobs, and scheduled
-  runs, which read source tables directly as you. Interactive dry runs still check the **viewer's** own access.
-- With `secret`, anyone with READ on the secret scope can read it: you, workspace admins, and the app's service principal
-  (the setup adds that one READ ACL on the scope; it is not a Unity Catalog grant). With `app_yaml` nothing is granted, but
-  anyone who can read the install folder or the app's deployed source can read it.
-- Revoke it when you finish the POC (Settings > Developer > Access tokens).
+- **First visit**: a screen asks for your PAT. It is checked against the signed-in user (someone else's token is
+  refused), then kept **only in your browser** as a secure cookie that page scripts cannot read. It is used only to
+  start and watch DQX jobs. Everything else (browsing, rules, results) runs as you through the app's
+  on-behalf-of sign-in. You are asked again only if you clear cookies, press **Forget token**, or the token expires
+  (at most 30 days).
+- **Check my access** (bottom-left bar) lists what you are missing, each with the exact fix: the job permission, the
+  schema and table grants, the warehouse, and a missing or expired token. It also opens by itself on your first visit
+  if something is missing, and whenever a request fails for lack of permission.
+- **Scheduler is disabled in dynamic PAT mode**: no token is stored for the app, so nothing could start a run when
+  nobody is using it. Run rules on demand from **Run Rules** (set **Row scope** to **All rows** to check every row).
+- First-run check: **Create Rules → Single table rules**, table `samples.bakehouse.sales_transactions`, column
+  `paymentMethod`, **Allowed values** `'visa', 'mastercard'` (**quote text values**: DQX 0.16 reads a bare word as a
+  column name). Then **Drafts & Review → Submit → Approve**, **Run Rules → All rows → Run selected**. Expect
+  **3,333 rows, 2,227 valid, 1,106 errors**.
 
 ## Troubleshooting
-
-| What you see | Cause | Fix |
-|---|---|---|
-| `widget 'catalog' must be set` (or another field) | A field in step 5 is empty | Fill it in and run all again |
-| `expected one bundle/MANIFEST.json under ...` | Field 1 does not point at the repo zip or folder | Use **Copy path** on the uploaded zip; for a Git folder leave it blank |
-| `the PAT was rejected (403)` or `(401)` | PATs are disabled for you, or the token was mistyped or has expired | Create a new PAT (step 2). If PATs are disabled, this build cannot be used |
-| `that is this notebook's own context token` | A token was taken from inside a notebook | Only a PAT created in the UI (step 2) works |
-| A run fails with `UNRESOLVED_COLUMN` | An allowed value is not quoted | Edit the rule and write `'visa'`, not `visa` |
-| A run sits at "running" for several minutes | The cluster was terminated and the job is starting it | Wait about 8 minutes, or start the cluster first |
-| `deployment failed: open the app's Logs tab` | The app did not start | **Compute** > **Apps** > the app > **Logs**. Then re-run the notebook |
-| `Unable to use fallback policies, please manually select a policy` (or `requires a budget policy`) when the app is created | The workspace requires a budget policy on new apps | **Compute** > **Apps** > **Create app** > **Custom**, use the **same app name** as field 6, pick the policy, create. Then **Run all** again: the setup reuses the existing app. Or put the policy id in field 12 |
-| `user-authorisation scopes were refused` | On-behalf-of-user authorisation for Apps is not enabled in the workspace | A workspace admin enables user authorisation for Databricks Apps; then run all again |
-| `PERMISSION_DENIED` creating tables | Missing CREATE TABLE or USE SCHEMA on the schema | Ask the schema owner for those privileges |
+| What you see | Fix |
+|---|---|
+| DEPLOY: `Import these wheel packs into … first` | Import the named `dqx-studio-wheels-<k>-of-6.zip` into the same folder as this one |
+| DEPLOY: `wheel(s) missing or corrupt` | Delete that pack's folder and import its ZIP again |
+| DEPLOY: `attach this notebook to the existing classic all-purpose cluster` | DEPLOY must run on the classic cluster, not serverless |
+| DEPLOY: `Unable to use fallback policies` | See the note under option A |
+| DEPLOY: `Could not add the scopes` | Compute → Apps → the app → Edit → User authorization → add `sql`, `catalog.catalogs:read`, `catalog.schemas:read`, `catalog.tables:read`. If refused, a workspace admin must enable user authorization for Apps |
+| App: `That token belongs to …` | Use a token you created yourself |
+| App: a run fails with `UNRESOLVED_COLUMN` | Quote text values in Allowed values: `'visa'`, not `visa` |
+| App: a run stays at "running" for minutes | The cluster was terminated and the job is starting it (about 6 to 8 minutes) |
 
 ## Remove it
+1. Compute → Apps → the app → **Stop**, **Delete** (option A). In option B, delete `app-catalog-main/child_apps/dqx_studio/` and run the catalog's DEPLOY.
+2. Jobs & Pipelines → the task-runner job → **Delete**.
+3. Drop the 16 `dq_*` tables in your schema.
+4. Delete the install folder (`/Workspace/Users/<you>/dqx_studio_install` and `.previous`), the imported folders, and revoke your PAT.
 
-1. **Compute** > **Apps** > the app > **Stop**, then **Delete**.
-2. **Jobs & Pipelines** > `<app name>-task-runner` > **Delete**.
-3. Drop Studio's tables: in a notebook or the SQL editor, `SHOW TABLES IN <catalog>.<schema> LIKE 'dq_*'`, then `DROP TABLE` each one. Also drop any leftover `tmp_view_*` views.
-4. Delete the secret scope (if you used `secret`): in a notebook, `dbutils.secrets` cannot delete scopes, so use
-   `from databricks.sdk import WorkspaceClient; WorkspaceClient().secrets.delete_scope("<scope>")`.
-5. Delete the install folder (`/Workspace/Users/<you>/dqx_studio_airgap` and `.previous`) and the uploaded zip.
-6. Revoke the PAT.
-
-## Rebuild `bundle/` (machine with internet)
-
-`build/build_bundle.sh` clones DQX at `v0.16.0` and applies `build/patches/`. It then builds the UI with the AI and
-contract features compiled out, downloads every wheel, and checks that both wheel sets install offline. Finally it replaces
-`bundle/` and writes `SHA256SUMS.txt`. It needs git, node and yarn 1.x, uv and python3.11.
-
-## What changes for production
-
-Use stock DQX Studio (`studio-v0.1.0` or later) with:
-
-- a **Lakebase** project for its state (required from `studio-v0.1.0`);
-- a properly permissioned app service principal and task-runner service principal in place of the PAT;
-- serverless jobs (or a bundle override to a classic cluster);
-- a package mirror reachable from the Apps builder;
-- FMAPI for the AI features.
+## Rebuild
+`build/build_bundle.sh` clones DQX at `v0.16.0`, applies `build/patches/` (9) and builds the UI with the AI features
+compiled out. `build/make_packs.py <app wheels> <cluster wheels>` splits the wheels into the packs and writes
+`wheels.json`, which DEPLOY checks every file against (size and sha256).
 
 ## Licences
-
-DQX and DQX Studio are © Databricks, Inc. and licensed under the **Databricks License**. It permits use only in connection
-with the Databricks Services. A copy of the licence and the NOTICE are in `LICENSES/`. This build modifies Studio:
-see [PATCHES.md](PATCHES.md) and the `# MODIFIED` headers. The vendored wheels in `bundle/app/wheels/` and
-`bundle/cluster_wheels/` are unmodified third-party packages, each under its own licence (in its metadata), mostly
-Apache-2.0, MIT and BSD. The task-runner wheel is built from DQX Studio's own `tasks/` source.
+DQX and DQX Studio are © Databricks, Inc. and licensed under the **Databricks License**, which permits use only in
+connection with the Databricks Services (copies in `LICENSES/`). This build modifies Studio: see
+[PATCHES.md](PATCHES.md) and the `# MODIFIED` / `# ADDED` headers. The wheels in the packs are unmodified
+third-party packages, each under its own licence (in its metadata), mostly Apache-2.0, MIT and BSD. The task-runner
+wheel is built from DQX Studio's own `tasks/` source.

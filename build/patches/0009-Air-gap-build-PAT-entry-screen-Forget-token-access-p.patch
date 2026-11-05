@@ -1,8 +1,8 @@
-From 195d6caf268b5ae81e1de4f4c9d599f64fba4d2d Mon Sep 17 00:00:00 2001
+From 6b04f43f455149a02a7fd53871230504462a769e Mon Sep 17 00:00:00 2001
 From: dqx-studio-airgap build <build@localhost>
 Date: Thu, 5 Nov 2026 20:06:07 +1100
-Subject: [PATCH 9/9] Air-gap build: PAT entry screen, Forget token, access
- panel; Schedules tab shows the scheduler as off in dynamic PAT mode
+Subject: [PATCH 9/9] Air-gap build: PAT entry screen, Forget token, access panel;
+ Schedules tab shows the scheduler as off in dynamic PAT mode
 
 ---
  app/src/databricks_labs_dqx_app/ui/index.html |   2 +
@@ -26,7 +26,7 @@ index 0f56d897..fe02fc7f 100644
  </html>
 diff --git a/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js b/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
 new file mode 100644
-index 00000000..73dae3fd
+index 00000000..27cb836f
 --- /dev/null
 +++ b/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
 @@ -0,0 +1,179 @@
@@ -109,7 +109,7 @@ index 00000000..73dae3fd
 +        "DQX Studio starts and watches its data-quality jobs with your own token, so every run is done as you. " +
 +        "Create one in Databricks: your user icon > Settings > Developer > Access tokens > Generate new token." }),
 +      el("label", { text: "Personal access token", style: "font-size:13px;font-weight:600;" }), input, msg,
-+      el("ul", { style: "margin:0 0 18px;padding-left:18px;font-size:12.5px;line-height:1.55;color:#475569;" }, [
++      el("ul", { style: "margin:0 0 18px;padding-left:18px;font-size:12.5px;line-height:1.55;color:#475569;list-style:disc outside;" }, [
 +        el("li", { text: "It is kept only in this browser, as a secure cookie that page scripts cannot read. It is not stored in the app." }),
 +        el("li", { text: "It must be your own: the app checks it belongs to the signed-in user." }),
 +        el("li", { text: "You are asked again only if you clear cookies, press Forget token, or the token expires (at most 30 days)." }),

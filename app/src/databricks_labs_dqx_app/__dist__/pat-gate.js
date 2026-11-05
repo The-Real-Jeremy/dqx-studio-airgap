@@ -77,7 +77,7 @@
         "DQX Studio starts and watches its data-quality jobs with your own token, so every run is done as you. " +
         "Create one in Databricks: your user icon > Settings > Developer > Access tokens > Generate new token." }),
       el("label", { text: "Personal access token", style: "font-size:13px;font-weight:600;" }), input, msg,
-      el("ul", { style: "margin:0 0 18px;padding-left:18px;font-size:12.5px;line-height:1.55;color:#475569;" }, [
+      el("ul", { style: "margin:0 0 18px;padding-left:18px;font-size:12.5px;line-height:1.55;color:#475569;list-style:disc outside;" }, [
         el("li", { text: "It is kept only in this browser, as a secure cookie that page scripts cannot read. It is not stored in the app." }),
         el("li", { text: "It must be your own: the app checks it belongs to the signed-in user." }),
         el("li", { text: "You are asked again only if you clear cookies, press Forget token, or the token expires (at most 30 days)." }),
