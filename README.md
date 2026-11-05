@@ -1,5 +1,7 @@
 # DQX Studio for air-gapped workspaces: child and PAT edition
 
+**For isolated dev and demo workspaces with dummy data only, not production.**
+
 **This branch (`child-pat`) is the child and PAT edition.** It differs from the `main` build in three ways:
 - it installs **standalone or as a child app of an App-ception app**;
 - **each user enters their own personal access token (PAT)** in the app, kept only in their own browser, and no
