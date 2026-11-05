@@ -43,7 +43,9 @@ for k, b in enumerate(bins, 1):
         # Explicit folder entries: Workspace Import refuses a ZIP whose folders exist only implicitly
         # ("The parent folder (.../app) does not exist").
         for d in [f"{name}/"] + sorted({f"{name}/{f['target']}/" for f in b}):
-            z.writestr(zipfile.ZipInfo(d), "")
+            zi = zipfile.ZipInfo(d)
+            zi.external_attr = (0o40755 << 16) | 0x10  # a directory, rwxr-xr-x (else a local unzip makes unreadable folders)
+            z.writestr(zi, "")
         for f in b:
             f["pack"] = k
             z.write(f["_path"], f"{name}/{f['target']}/{f['name']}")

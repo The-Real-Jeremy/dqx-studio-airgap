@@ -100,9 +100,14 @@ folder does not contain the old copy.
 
 - **First visit**: a screen asks for your PAT. It is checked against the signed-in user (someone else's token is
   refused), then kept **only in your browser** as a secure cookie that page scripts cannot read. It is used only to
-  start and watch DQX jobs. Everything else (browsing, rules, results) runs as you through the app's
-  on-behalf-of sign-in. You are asked again only if you clear cookies, press **Forget token**, or the token expires
-  (at most 30 days).
+  start and watch DQX jobs. Browsing, rules and results run as you through the app's on-behalf-of sign-in. (DQX
+  runs themselves run on the task-runner job, as its owner: see "Who needs what".) You are asked again only if you
+  clear cookies, press **Forget token**, or the token expires (at most 30 days).
+- **Inside App-ception (option B)** Studio runs under its own path, `/apps/dqx_studio/`. The token cookie is scoped
+  to that path, so no other app in the same App-ception ever receives it. The key that seals it exists only in
+  Studio's own process, so no other app could open it even with a copy. The trade-off: when Studio restarts (for
+  example after App-ception stops it for being idle), everyone is asked for their token again. Standalone (option A),
+  the key comes from Studio's own app secret, so tokens survive restarts.
 - **Check my access** (bottom-left bar) lists what you are missing, each with the exact fix: the job permission, the
   schema and table grants, the warehouse, and a missing or expired token. It also opens by itself on your first visit
   if something is missing, and whenever a request fails for lack of permission.

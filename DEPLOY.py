@@ -366,6 +366,10 @@ def write_app_folder(dest):
            "DQX_SCHEDULER_DISABLED": "1", "DATABRICKS_WAREHOUSE_ID": W["warehouse_id"], "DQX_CATALOG": W["catalog"],
            "DQX_SCHEMA": W["schema"], "DQX_TMP_SCHEMA": W["schema"], "DQX_JOB_ID": str(JOB_ID), "DQX_JOB_NAME": JOB_NAME,
            "DQX_ADMIN_GROUP": W["admin_group"]}
+    # Standalone: the PAT cookie's key is derived from this app's own secret, so tokens survive restarts. As a child
+    # the key stays random and in memory only (siblings share App-ception's secret): users re-enter after a restart.
+    if W["mode"] == "standalone":
+        env["DQX_PAT_KEY_SCOPE"] = "app"
     app_yaml = {"command": ["python", "-m", "uvicorn", "databricks_labs_dqx_app.backend.app:app", "--app-dir", "src", "--workers", "1"],
                 "env": [{"name": k, "value": v} for k, v in env.items()]}
     with open(f"{dest}/app.yaml", "w") as fh:

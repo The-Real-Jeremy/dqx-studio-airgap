@@ -1,7 +1,8 @@
 # Card metadata for running this app as a child of App-ception (ignored when deployed standalone).
 title: DQX Studio
-description: No-code data-quality rules with Databricks Labs DQX. Author, approve and run checks on the existing classic cluster; each user runs as themselves with their own token, kept only in their browser.
+description: No-code data-quality rules with Databricks Labs DQX. Author, approve and run checks on the existing classic cluster; each user signs in with their own token, kept only in their browser and scoped to this app.
 app_dir: app
-mount: root
+# prefix: the token cookie is scoped to /apps/dqx_studio/, so no other child app receives it
+mount: prefix
 user_api_scopes: ["sql", "catalog.catalogs:read", "catalog.schemas:read", "catalog.tables:read"]
 source: https://github.com/databrickslabs/dqx

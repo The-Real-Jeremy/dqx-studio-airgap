@@ -1,14 +1,15 @@
-From d12971c83e02021f1420947c9ef4ca28156e195d Mon Sep 17 00:00:00 2001
+From 13bf7f9459e852c76e4aa9bb5eaa00b17d643f52 Mon Sep 17 00:00:00 2001
 From: dqx-studio-airgap build <build@localhost>
-Date: Thu, 5 Nov 2026 20:06:07 +1100
-Subject: [PATCH 9/9] Air-gap build: PAT entry screen, Forget token, access panel;
- Schedules tab shows the scheduler as off in dynamic PAT mode
+Date: Thu, 5 Nov 2026 22:15:13 +1100
+Subject: [PATCH 9/9] Air-gap build: PAT entry screen, Forget token, access
+ panel; Schedules tab shows the scheduler as off in dynamic PAT mode
 
 ---
  app/src/databricks_labs_dqx_app/ui/index.html |   2 +
- .../ui/public/pat-gate.js                     | 183 ++++++++++++++++++
+ app/src/databricks_labs_dqx_app/ui/main.tsx   |   6 +
+ .../ui/public/pat-gate.js                     | 185 ++++++++++++++++++
  .../ui/routes/_sidebar/runs.tsx               |  23 +++
- 3 files changed, 208 insertions(+)
+ 4 files changed, 216 insertions(+)
  create mode 100644 app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
 
 diff --git a/app/src/databricks_labs_dqx_app/ui/index.html b/app/src/databricks_labs_dqx_app/ui/index.html
@@ -24,12 +25,31 @@ index 0f56d897..fe02fc7f 100644
      <script type="module" src="./main.tsx"></script>
    </body>
  </html>
+diff --git a/app/src/databricks_labs_dqx_app/ui/main.tsx b/app/src/databricks_labs_dqx_app/ui/main.tsx
+index 46eeb528..83a8cc09 100644
+--- a/app/src/databricks_labs_dqx_app/ui/main.tsx
++++ b/app/src/databricks_labs_dqx_app/ui/main.tsx
+@@ -32,8 +32,14 @@ const queryClient = new QueryClient({
+   },
+ });
+ 
++// Air-gap build: under App-ception's prefix mount the app lives at /apps/<name>/; the host's shim tag carries that
++// prefix, so the router matches routes below it. Standalone (no shim tag) the base stays "/".
++const appceptionShim = document.querySelector<HTMLScriptElement>("script[data-prefix][data-mode='prefix']");
++const routerBasepath = appceptionShim?.dataset.prefix ? appceptionShim.dataset.prefix.replace(/\/$/, "") : "/";
++
+ const router = createRouter({
+   routeTree,
++  basepath: routerBasepath,
+   context: {
+     queryClient,
+   },
 diff --git a/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js b/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
 new file mode 100644
-index 00000000..589deaa2
+index 00000000..85addd1e
 --- /dev/null
 +++ b/app/src/databricks_labs_dqx_app/ui/public/pat-gate.js
-@@ -0,0 +1,183 @@
+@@ -0,0 +1,185 @@
 +/*
 + * Air-gap build: browser-held personal access token (PAT) and per-user access check.
 + *
@@ -43,7 +63,7 @@ index 00000000..589deaa2
 +(function () {
 +  "use strict";
 +  var API = "/api/v1";
-+  var state = { mode: null, shownCheck: false, checking: false };
++  var state = { mode: null, shownCheck: false, checking: false, keyScope: null };
 +
 +  function el(tag, attrs, children) {
 +    var e = document.createElement(tag);
@@ -117,6 +137,7 @@ index 00000000..589deaa2
 +        el("li", { text: "It is kept only in this browser, as a secure cookie that page scripts cannot read. It is not stored in the app." }),
 +        el("li", { text: "It must be your own: the app checks it belongs to the signed-in user." }),
 +        el("li", { text: "You are asked again only if you clear cookies, press Forget token, or the token expires (at most 30 days)." }),
++        state.keyScope === "process" ? el("li", { text: "In this deployment the token is also forgotten whenever Studio restarts (for example after App-ception stops it for being idle), so you may be asked again. That keeps it unreadable by any other app." }) : null,
 +        el("li", { text: "Scheduler is disabled in dynamic PAT mode: run rules on demand from Run Rules." }),
 +      ]),
 +      el("div", { style: "display:flex;gap:10px;justify-content:flex-end;" }, [save]),
@@ -206,6 +227,7 @@ index 00000000..589deaa2
 +    call("GET", "/pat/status").then(function (r) {
 +      if (r.status !== 200 || !r.json || r.json.mode !== "browser_pat") return;
 +      state.mode = "browser_pat";
++      state.keyScope = r.json.key_scope || null;
 +      if (!r.json.valid) { showTokenScreen(r.json.has_pat ? "Your saved token no longer works (expired or revoked). Enter a new one." : ""); return; }
 +      showBar();
 +      if (!sessionStorage.getItem("dqx-access-checked")) { sessionStorage.setItem("dqx-access-checked", "1"); runCheck(true); }

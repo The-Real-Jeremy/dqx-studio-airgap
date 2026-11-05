@@ -11,7 +11,7 @@
 (function () {
   "use strict";
   var API = "/api/v1";
-  var state = { mode: null, shownCheck: false, checking: false };
+  var state = { mode: null, shownCheck: false, checking: false, keyScope: null };
 
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -85,6 +85,7 @@
         el("li", { text: "It is kept only in this browser, as a secure cookie that page scripts cannot read. It is not stored in the app." }),
         el("li", { text: "It must be your own: the app checks it belongs to the signed-in user." }),
         el("li", { text: "You are asked again only if you clear cookies, press Forget token, or the token expires (at most 30 days)." }),
+        state.keyScope === "process" ? el("li", { text: "In this deployment the token is also forgotten whenever Studio restarts (for example after App-ception stops it for being idle), so you may be asked again. That keeps it unreadable by any other app." }) : null,
         el("li", { text: "Scheduler is disabled in dynamic PAT mode: run rules on demand from Run Rules." }),
       ]),
       el("div", { style: "display:flex;gap:10px;justify-content:flex-end;" }, [save]),
@@ -174,6 +175,7 @@
     call("GET", "/pat/status").then(function (r) {
       if (r.status !== 200 || !r.json || r.json.mode !== "browser_pat") return;
       state.mode = "browser_pat";
+      state.keyScope = r.json.key_scope || null;
       if (!r.json.valid) { showTokenScreen(r.json.has_pat ? "Your saved token no longer works (expired or revoked). Enter a new one." : ""); return; }
       showBar();
       if (!sessionStorage.getItem("dqx-access-checked")) { sessionStorage.setItem("dqx-access-checked", "1"); runCheck(true); }
