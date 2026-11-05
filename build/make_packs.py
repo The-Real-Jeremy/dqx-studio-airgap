@@ -40,6 +40,10 @@ for k, b in enumerate(bins, 1):
     name = f"dqx-studio-wheels-{k}-of-{n}"
     zp = os.path.join(a.out, name + ".zip")
     with zipfile.ZipFile(zp, "w", zipfile.ZIP_STORED) as z:
+        # Explicit folder entries: Workspace Import refuses a ZIP whose folders exist only implicitly
+        # ("The parent folder (.../app) does not exist").
+        for d in [f"{name}/"] + sorted({f"{name}/{f['target']}/" for f in b}):
+            z.writestr(zipfile.ZipInfo(d), "")
         for f in b:
             f["pack"] = k
             z.write(f["_path"], f"{name}/{f['target']}/{f['name']}")
